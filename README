@@ -1,28 +1,28 @@
-#Vive Cinema
+# Vive Cinema
 
 Vive Cinema is an open source VR media player application depended on HTC Vive. This application needs be executed on Windows 7 platform or later, with the software steamVR running. The basic functions are implemented in C++ language and OpenGL 4 API. Furthermore, there are advanced features such as spatial audio decoding and decoding with GPU acceleration. These features are depended on other related libraries which are listed in "Third Parties" section.
 
-###Feature Highlights
+### Feature Highlights
 
-- Video Types: 2D/stereo videos, 180/360 degree videos, stereo 180/360 degree videos
-     - Spatial Audio with HRTF (SADIE Binaural Measurement KU100)
-     - FOA ([youtube spatial audio spec](https://github.com/google/spatial-media/blob/master/docs/spatial-audio-rfc.md))
-     - Fuma
-     - TBE ([Facebook 360 Spatial WorkStation](https://facebook360.fb.com/spatial-workstation/))
-     - TOA
-     - ITU 5.1, 7.1
-- Hardware Acceleration for decoding. ( NVIDIA and AMD )
-- Subtitle for 180/360 videos
-- Virtual screen for 2D Videos with control gestures
+* Video Types: 2D/stereo videos, 180/360 degree videos, stereo 180/360 degree videos
+     * Spatial Audio with HRTF (SADIE Binaural Measurement KU100)
+     * FOA ( [youtube spatial audio spec](https://github.com/google/spatial-media/blob/master/docs/spatial-audio-rfc.md) )
+     * Fuma
+     * TBE ( [Facebook 360 Spatial WorkStation](https://facebook360.fb.com/spatial-workstation/) )
+     * TOA
+     * ITU 5.1, 7.1
+* Hardware Acceleration for decoding. ( NVIDIA and AMD )
+* Subtitle for 180/360 videos
+* Virtual screen for 2D Videos with control gestures
     
-##Prerequisites
+## Prerequisites
 
 - Windows 7, Windows 8, or Windows 10
 - Microsoft Visual Studio 2012
 - SteamVR
 - HTC Vive Hardware
 
-##Third Parties (in alphabetical order)
+## Third Parties (in alphabetical order)
 
 - [Advanced Media Framework (AMF) SDK 1.4.4](https://github.com/GPUOpen-LibrariesAndSDKs/AMF)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
@@ -33,17 +33,17 @@ Vive Cinema is an open source VR media player application depended on HTC Vive. 
 - [SDL2 2.0.3](https://www.libsdl.org/) 
 - [uchardet 0.0.6](https://github.com/BYVoid/uchardet)
 
-##Getting Started
+## Getting Started
 
 You can find Visual Studio 2012 solution file ViveCinema.sln in folder vivecinema. Open it and build.
         
-##Run
+## Run
 
-###Setup HTC Vive  
+### Setup HTC Vive  
         
 You need connect the HTC Vive equipment in advanced. The minimum equipments that Vive Cinema needs are the HMD and one base station. A controller is optional but recommanded.
 
-###First Run the program
+### First Run the program
 
 You can run the program if the solution is built successfully. The default video folder path is the folder `Vive Cinema` in Windows Video Library. If Vive Cinema can’t find the folder, it will create one automatically. And there is two default demonstration videos included in the folder: Watch Me Please.mp4 and The Deserted.mp4. 
 - Watch Me Please.mp4
@@ -53,8 +53,8 @@ You can run the program if the solution is built successfully. The default video
      - 360 stereo videos with 4Kx4K resolution
      - TBE spatial audio
 
-###Put Your Videos Into `Vive Cinema` Folder or Set Your Video Path and Run
-
+### Put Your Videos Into `Vive Cinema` Folder or Set Your Video Path and Run
+ 
 There is another way to set your video path: modify the xml file `vivecinema.xml` in the `Vive Cinema` folder created before.
 - Open `vivecinema.xml` by Notepad or Notepad++
 - Write down your video directories absolute path between the tag `<videopaths><\videopaths>`
@@ -62,7 +62,7 @@ There is another way to set your video path: modify the xml file `vivecinema.xml
 - The xml file should be saved as UTF-8 format. 
 
 
-###The Whole Features of Vive Cinema
+### The Whole Features of Vive Cinema
 
 - Video Types: 2D/Stereo Videos, 180/360 Degree Videos, Stereo 180/360 Degree Videos
      - File Format: .mp4, .mov, .mkv, .divx
@@ -92,12 +92,12 @@ There is another way to set your video path: modify the xml file `vivecinema.xml
        b. Point to the function icon on the widget panel, press Trigger.
        c. Press Grip to Pause or Start the video.
 
-##Advanced
+## Advanced
 
 Vive Cinema shows how to decode videos using GPU acceleration. We studied two kinds of GPU acceleration framework: NVIDIA Video Codec SDK and Advanced Media Framework (AMF) SDK.
 The demonstration codes are in [HWAccelDecoder.h](vivecinema/HWAccelDecoder.h) and [HWAccelDecoder.cpp](vivecinema/HWAccelDecoder.cpp).
 
-##Appendix: Balai Example
+## Appendix: Balai Example
 
 Balai is a OpenGL-based rendering framework which Vive Cinema uses. We provide two examples to show how to manipulate it.
 
@@ -107,7 +107,7 @@ Balai is a OpenGL-based rendering framework which Vive Cinema uses. We provide t
      - HelloBalaiVR
        It is an example to demonstrate how to manipulate VR features with balai rendering framework. The default (and the only) component is depended on [openvr](https://github.com/ValveSoftware/openvr).
 
-##License
+## License
 
 Vive Cinema is distributed under the terms of GPLv3.
 
