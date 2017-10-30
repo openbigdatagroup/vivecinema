@@ -75,22 +75,22 @@ There is another way to set your video path: modify the xml file `vivecinema.xml
      * External File Formats: .ass, .srt
 * Control Gestures
      * [Select Video] 
-       a. Point to the video thumbnail, pull Trigger.
-       b. Swipe left and right on Touchpad of controller to the next page if more than 12 videos.
+          1. Point to the video thumbnail, pull Trigger.
+          2. Swipe left and right on Touchpad of controller to the next page if more than 12 videos.
      * [Manual change the playing mode to stereo or 360 video]
-       a. In the Video Selection page, the right-top corner of thumbnail will show a setting icon. Point to this icon then it will show a video type selection panel. 
-       b. Pull Trigger to switch the mode. You can select the combination of 3D SBS, 3D TB, 360, 180, Noticed 360 SBS supports to some video claimed stereo 180 degree.
+          1. In the Video Selection page, the right-top corner of thumbnail will show a setting icon. Point to this icon then it will show a video type selection panel. 
+          2. Pull Trigger to switch the mode. You can select the combination of 3D SBS, 3D TB, 360, 180, Noticed 360 SBS supports to some video claimed stereo 180 degree.
      * [Adjust the screen position]
-       a. For flat, stereo(3D) videos
-         - Point to the screen, pull and hold Trigger. then point to any position to put down the screen.
-         - Point to the screen, pull and hold Trigger, swipe top/down on Touchpad to adjust the distance of the screen.
-         - Point to the screen, pull and hold Trigger, press Touchpad to rotate the screen.
-       b. For 360, stereo 360 videos
-         - Press and hold Trigger, swipe left/right on Touchpad to adjust the view direction on the center.
+          1. For flat, stereo(3D) videos
+               - Point to the screen, pull and hold Trigger. then point to any position to put down the screen.
+               - Point to the screen, pull and hold Trigger, swipe top/down on Touchpad to adjust the distance of the screen.
+               - Point to the screen, pull and hold Trigger, press Touchpad to rotate the screen.
+          2. For 360, stereo 360 videos
+               - Press and hold Trigger, swipe left/right on Touchpad to adjust the view direction on the center.
      * [Play, Pause, Next Video, and Volume control]
-       a. Press Menu to show or hide the widget panel.
-       b. Point to the function icon on the widget panel, press Trigger.
-       c. Press Grip to Pause or Start the video.
+          1. Press Menu to show or hide the widget panel.
+          2. Point to the function icon on the widget panel, press Trigger.
+          3. Press Grip to Pause or Start the video.
 
 ## Advanced
 
@@ -102,10 +102,12 @@ The demonstration codes are in [HWAccelDecoder.h](vivecinema/HWAccelDecoder.h) a
 Balai is a OpenGL-based rendering framework which Vive Cinema uses. We provide two examples to show how to manipulate it.
 
 * HelloBalai
-    It is the simplest example to show the balai rendering framework.
+
+It is the simplest example to show the balai rendering framework.
 
 * HelloBalaiVR
-    It is an example to demonstrate how to manipulate VR features with balai rendering framework. The default (and the only) component is depended on [openvr](https://github.com/ValveSoftware/openvr).
+
+It is an example to demonstrate how to manipulate VR features with balai rendering framework. The default (and the only) component is depended on [openvr](https://github.com/ValveSoftware/openvr).
 
 ## License
 
