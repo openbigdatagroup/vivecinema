@@ -2,7 +2,7 @@
 
 Vive Cinema is an open source VR media player application depended on HTC Vive. This application needs be executed on Windows 7 platform or later, with the software steamVR running. The basic functions are implemented in C++ language and OpenGL 4 API. Furthermore, there are advanced features such as spatial audio decoding and decoding with GPU acceleration. These features are depended on other related libraries which are listed in "Third Parties" section.
 
-### Feature Highlights
+##### Feature Highlights
 
 * Video Types: 2D/stereo videos, 180/360 degree videos, stereo 180/360 degree videos
      * Spatial Audio with HRTF (SADIE Binaural Measurement KU100)
@@ -39,11 +39,11 @@ You can find Visual Studio 2012 solution file ViveCinema.sln in folder vivecinem
         
 ## Run
 
-### Setup HTC Vive  
+#### Setup HTC Vive  
         
 You need connect the HTC Vive equipment in advanced. The minimum equipments that Vive Cinema needs are the HMD and one base station. A controller is optional but recommanded.
 
-### First Run the program
+#### First Run the program
 
 You can run the program if the solution is built successfully. The default video folder path is the folder `Vive Cinema` in Windows Video Library. If Vive Cinema can’t find the folder, it will create one automatically. And there is two default demonstration videos included in the folder: Watch Me Please.mp4 and The Deserted.mp4. 
 * Watch Me Please.mp4
@@ -53,7 +53,7 @@ You can run the program if the solution is built successfully. The default video
      * 360 stereo videos with 4Kx4K resolution
      * TBE spatial audio
 
-### Put Your Videos Into `Vive Cinema` Folder or Set Your Video Path and Run
+#### Put Your Videos Into `Vive Cinema` Folder or Set Your Video Path and Run
  
 There is another way to set your video path: modify the xml file `vivecinema.xml` in the `Vive Cinema` folder created before.
 * Open `vivecinema.xml` by Notepad or Notepad++
@@ -62,7 +62,7 @@ There is another way to set your video path: modify the xml file `vivecinema.xml
 * The xml file should be saved as UTF-8 format. 
 
 
-### The Whole Features of Vive Cinema
+#### The Whole Features of Vive Cinema
 
 * Video Types: 2D/Stereo Videos, 180/360 Degree Videos, Stereo 180/360 Degree Videos
      * File Format: .mp4, .mov, .mkv, .divx
