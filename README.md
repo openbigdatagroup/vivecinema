@@ -101,11 +101,11 @@ The demonstration codes are in [HWAccelDecoder.h](vivecinema/HWAccelDecoder.h) a
 
 Balai is a OpenGL-based rendering framework which Vive Cinema uses. We provide two examples to show how to manipulate it.
 
-     * HelloBalai
-       It is the simplest example to show the balai rendering framework.
+* HelloBalai
+    It is the simplest example to show the balai rendering framework.
 
-     * HelloBalaiVR
-       It is an example to demonstrate how to manipulate VR features with balai rendering framework. The default (and the only) component is depended on [openvr](https://github.com/ValveSoftware/openvr).
+* HelloBalaiVR
+    It is an example to demonstrate how to manipulate VR features with balai rendering framework. The default (and the only) component is depended on [openvr](https://github.com/ValveSoftware/openvr).
 
 ## License
 
