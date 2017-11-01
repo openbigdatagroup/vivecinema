@@ -46,10 +46,10 @@ You need connect the HTC Vive equipment in advanced. The minimum equipments that
 #### First Run the program
 
 You can run the program if the solution is built successfully. The default video folder path is the folder `Vive Cinema` in Windows Video Library. If Vive Cinema can’t find the folder, it will create one automatically. And there is two default demonstration videos included in the folder: Watch Me Please.mp4 and The Deserted.mp4. 
-* Watch Me Please.mp4
+* [Watch Me Please.mp4] (vivecinema/bin/videos/Watch Me Please.mp4)
      * 2D videos to introduce the features of Vive Cinema and supportive gestures.
      * Subtitle feature show case
-* The Deserted.mp4 (2017 VR Movie Trailer by Director Ming-Liang Tsai)
+* (to be continued) The Deserted.mp4 (2017 VR Movie Trailer by Director Ming-Liang Tsai)
      * 360 stereo videos with 4Kx4K resolution
      * TBE spatial audio
 
