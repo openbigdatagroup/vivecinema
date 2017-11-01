@@ -109,6 +109,11 @@ Balai is a OpenGL-based rendering framework which Vive Cinema uses. We provide t
 
     It is an example to demonstrate how to manipulate VR features with balai rendering framework. The default (and the only) component is depended on [openvr](https://github.com/ValveSoftware/openvr).
 
+* HelloVoxel
+
+    It is a demonstration about volume rendering.
+    Requirement: RGBAF16 render buffer (Graphic Card)
+    
 ## License
 
 Vive Cinema is distributed under the terms of GPLv3.
