@@ -1,0 +1,24 @@
+﻿[Script Info]
+;本字幕檔案用 Note++ 工人智慧編譯
+;Vive Cinema Copyright(C) 2016-Present
+;陳宏麟 andre_chen@htc.com, andre.hl.chen@gmail.com <-- in case you can not find me!
+;陳裕美 yumei_chen@htc.com.... 
+;以上就兩個人!!!
+Title: Vive Cinema - Watch Me Please
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+Timer: 100.0000
+Synch Point: 
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,微軟雅黑,72,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:04.000,0:00:06.000,Default,,0,0,0,,{\pos(960.0,1000.0)}有沒有字幕阿?
+Dialogue: 0,0:00:06.000,0:00:08.000,Default,,0,0,0,,{\pos(960.0,1000.0)}沒看到的話我會很難過了Q___Q
+Dialogue: 0,0:02:19.000,0:02:21.000,Default,,0,0,0,,{\pos(960.0,1000.0)}喔耶!(我是andre)
+Dialogue: 0,0:02:21.000,0:02:23.000,Default,,0,0,0,,{\pos(960.0,1000.0)}沒有彩蛋，可以關掉啦 (我是yumei)

@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ViveCinema", "ViveCinema.vcxproj", "{32022196-08A5-4E1F-BDCC-B15EE0ED7279}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libuchardet", "..\third_party\uchardet\libuchardet.vcxproj", "{EE52A599-4350-4813-A948-232DB60EC8CA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Debug|x64 = Debug|x64
+		Release|Win32 = Release|Win32
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Debug|Win32.ActiveCfg = Debug|Win32
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Debug|Win32.Build.0 = Debug|Win32
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Debug|x64.ActiveCfg = Debug|x64
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Debug|x64.Build.0 = Debug|x64
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Release|Win32.ActiveCfg = Release|Win32
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Release|Win32.Build.0 = Release|Win32
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Release|x64.ActiveCfg = Release|x64
+		{32022196-08A5-4E1F-BDCC-B15EE0ED7279}.Release|x64.Build.0 = Release|x64
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Debug|Win32.ActiveCfg = Debug|Win32
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Debug|Win32.Build.0 = Debug|Win32
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Debug|x64.ActiveCfg = Debug|x64
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Debug|x64.Build.0 = Debug|x64
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Release|Win32.ActiveCfg = Release|Win32
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Release|Win32.Build.0 = Release|Win32
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Release|x64.ActiveCfg = Release|x64
+		{EE52A599-4350-4813-A948-232DB60EC8CA}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
