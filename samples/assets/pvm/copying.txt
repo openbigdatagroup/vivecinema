@@ -1,0 +1,12 @@
+http://www9.informatik.uni-erlangen.de/External/vollib/
+
+Description:
+  Foot
+
+Courtesy:
+  Philips Research, Hamburg, Germany
+  http://www.philips.de/forschung
+
+Parameters:
+  CT Scan
+  Philips CT Scanner
