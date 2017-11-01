@@ -1,0 +1,67 @@
+What's New in Video Codec SDK 8.0:
+---------------------------------
+In NVIDIA Video Codec SDK release 8.0, following features have been added:
+
+Encode Features 
+-----------------
+1) Encoding support for OGL surfaces (Linux only)
+2) Improved quality for HEVC spatial adaptive quantization
+3) Weighted prediction
+4) External motion hints for H.264 motion estimation (ME) only mode
+5) Support for fractional values in target quality rate control mode 
+
+
+Decode Features 
+-----------------
+1) HEVC 10 bit decoding
+2) HEVC 12 bit decoding
+3) VP9 10 bit decoding
+4) VP9 12 bit decoding
+5) Decode capability API
+6) Decode latency reduction 
+7) Memory optimization for I/IDR-frame only decoding
+
+
+Please refer to .\doc\NVENC_Application_Note.pdf and .\doc\NVDEC_Application_Note.pdf to get more details about the available encoding and decoding functionalities in the SDK. 
+
+For system, software and build environment requirements, please refer to the file Readme.txt included in the SDK package.
+
+Package Contents
+----------------
+This package contains:
+
+1) Sample applications demonstrating various encoding/decoding capabilities - in directory .\Samples\
+
+2) NVIDIA video codec SDK samples guide
+   - [.\Samples\NVIDIA_Video_Codec_SDK_Samples_Guide.pdf]
+
+3) NVIDIA video encoder API header
+   - [.\Samples\common\inc\nvEncodeAPI.h]
+
+4) NVIDIA video encoder application note
+   - [.\doc\NVENC_Application_Note.pdf]
+
+5) NVIDIA video encoder programming guide
+   - [.\doc\NVENC_VideoEncoder_API_ProgGuide.pdf]
+
+6) NVIDIA video encoder API reference manual
+   - [.\doc\NvEncodeAPI_v.8.0.chm]
+   - [.\doc\NvEncodeAPI_v.8.0.pdf]
+
+7) NVIDIA video decoder API header
+   - [.\Samples\common\inc\dynlink_cuviddec.h]
+   - [.\Samples\common\inc\dynlink_nvcuvid.h]
+
+8) NVIDIA video decoder application note
+   - [.\doc\NVDEC_Application_Note.pdf]
+
+9) NVIDIA video decoder programming guide
+   - [.\doc\NVDEC_VideoDecoder_API_ProgGuide.pdf]
+
+10) Using NVIDIA video accelerators in FFmpeg
+    - [.\doc\Using FFmpeg with NVIDIA GPU Hardware Acceleration.pdf]
+
+P.N.: The sample applications provided in the package are for demonstration purposes only and may not be fully tuned for quality and performance. 
+Hence the users are advised to do their independent evaluation for quality and/or performance. 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+

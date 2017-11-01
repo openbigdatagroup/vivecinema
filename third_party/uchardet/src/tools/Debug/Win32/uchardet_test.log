@@ -1,0 +1,20 @@
+﻿Build started 2016/8/17 下午 05:50:22.
+     1>Project "D:\Project\Andre_Balai\git\balai\middlewares\uchardet\src\tools\uchardet_test.vcxproj" on node 2 (Build target(s)).
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V110\Microsoft.CppBuild.targets(345,5): warning MSB8004: Intermediate Directory does not end with a trailing slash.  This build instance will add the slash as it is required to allow proper evaluation of the Intermediate Directory.
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V110\Microsoft.CppBuild.targets(346,5): warning MSB8004: Output Directory does not end with a trailing slash.  This build instance will add the slash as it is required to allow proper evaluation of the Output Directory.
+     1>InitializeBuildStatus:
+         Touching "Debug\Win32\uchardet_test.unsuccessfulbuild".
+       ClCompile:
+         All outputs are up-to-date.
+       Link:
+         C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\link.exe /ERRORREPORT:PROMPT /OUT:"Debug\Win32\uchardet_test.exe" /INCREMENTAL /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"Debug\Win32\uchardet_test.pdb" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"Debug\Win32\uchardet_test.lib" /MACHINE:X86 Debug\Win32\uchardet.obj
+         D:\Project\Andre_Balai\git\balai\samples\FontRendering\bin\vs2012\Win32\Debug\libuchardet\libuchardet.lib
+         uchardet_test.vcxproj -> D:\Project\Andre_Balai\git\balai\middlewares\uchardet\src\tools\Debug\Win32\uchardet_test.exe
+       FinalizeBuildStatus:
+         Deleting file "Debug\Win32\uchardet_test.unsuccessfulbuild".
+         Touching "Debug\Win32\uchardet_test.lastbuildstate".
+     1>Done Building Project "D:\Project\Andre_Balai\git\balai\middlewares\uchardet\src\tools\uchardet_test.vcxproj" (Build target(s)).
+
+Build succeeded.
+
+Time Elapsed 00:00:01.12

@@ -1,0 +1,24 @@
+﻿Build started 2016/8/17 下午 05:53:32.
+     1>Project "D:\Project\Andre_Balai\git\balai\middlewares\uchardet\src\tools\uchardet_test.vcxproj" on node 2 (Build target(s)).
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V110\Microsoft.CppBuild.targets(345,5): warning MSB8004: Intermediate Directory does not end with a trailing slash.  This build instance will add the slash as it is required to allow proper evaluation of the Intermediate Directory.
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V110\Microsoft.CppBuild.targets(346,5): warning MSB8004: Output Directory does not end with a trailing slash.  This build instance will add the slash as it is required to allow proper evaluation of the Output Directory.
+     1>InitializeBuildStatus:
+         Creating "Release\Win32\uchardet_test.unsuccessfulbuild" because "AlwaysCreate" was specified.
+       ClCompile:
+         C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\CL.exe /c /I..\ /I.\outside_include /Zi /nologo /W3 /WX- /O2 /Oi /Oy- /GL /D _MBCS /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Fo"Release\Win32\\" /Fd"Release\Win32\vc110.pdb" /Gd /TP /analyze- /errorReport:prompt uchardet.cpp
+         uchardet.cpp
+     1>D:\Project\Andre_Balai\git\balai\middlewares\uchardet\src\tools\outside_include\getopt.h(59): warning C4081: expected 'newline'; found ';'
+       Link:
+         C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\link.exe /ERRORREPORT:PROMPT /OUT:"Release\Win32\uchardet_test.exe" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"Release\Win32\uchardet_test.pdb" /OPT:REF /OPT:ICF /LTCG /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"Release\Win32\uchardet_test.lib" /MACHINE:X86 /SAFESEH Release\Win32\uchardet.obj
+         D:\Project\Andre_Balai\git\balai\samples\FontRendering\bin\vs2012\Win32\Release\libuchardet\libuchardet.lib
+         Generating code
+         Finished generating code
+         uchardet_test.vcxproj -> D:\Project\Andre_Balai\git\balai\middlewares\uchardet\src\tools\Release\Win32\uchardet_test.exe
+       FinalizeBuildStatus:
+         Deleting file "Release\Win32\uchardet_test.unsuccessfulbuild".
+         Touching "Release\Win32\uchardet_test.lastbuildstate".
+     1>Done Building Project "D:\Project\Andre_Balai\git\balai\middlewares\uchardet\src\tools\uchardet_test.vcxproj" (Build target(s)).
+
+Build succeeded.
+
+Time Elapsed 00:00:02.50
