@@ -44,11 +44,12 @@ class PVMParser
                              char const* comment) = 0;
 
 protected:
-    bool ReadVoxels_(float* dst, uint8 const* src, int cx, int cy, int cz, int components);
+    bool ReadVoxels_(float* dst, float& inf, float& sup,
+                     uint8 const* src, int cx, int cy, int cz, int components);
 
 public:
     PVMParser() {}
-    ~PVMParser() {}
+    virtual ~PVMParser() {}
 
     // ascii file only
     bool Load(char const* filename);

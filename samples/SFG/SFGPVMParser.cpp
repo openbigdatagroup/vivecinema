@@ -28,12 +28,6 @@
  */
 #include "SFGPVMParser.h"
 
-//
-// (c) by Stefan Roettger, licensed under GPL 2+
-//
-
-/////////////////////////////////////////////////////////////////////////////////////////
-// TO-DO : clear things up and group following to be in DDSLoader module
 #define DDS_BLOCKSIZE (1<<20)
 #define DDS_INTERLEAVE (1<<24)
 
@@ -42,43 +36,53 @@
 unsigned short int DDS_INTEL = 1;
 #define DDS_ISINTEL (*((uint8*)(&DDS_INTEL)+1)==0)
 
-uint8* DDS_cache;
-uint32 DDS_cachepos, DDS_cachesize;
-uint32 DDS_buffer;
-uint32 DDS_bufsize;
-
 // helper functions for DDS:
 inline uint32 DDS_shiftl(uint32 value, uint32 bits) { return (bits>=32) ? 0:(value<<bits); }
 inline uint32 DDS_shiftr(uint32 value, uint32 bits) { return (bits>=32) ? 0:(value>>bits); }
-inline uint32 DDS_swapuint(uint32 x) {return ((x&0xff)<<24)| ((x&0xff00)<<8)| ((x&0xff0000)>>8)| ((x&0xff000000)>>24); }
+inline uint32 DDS_swapuint(uint32 x) { return ((x&0xff)<<24)| ((x&0xff00)<<8)| ((x&0xff0000)>>8)| ((x&0xff000000)>>24); }
 
-inline uint32 DDS_readbits(uint32 bits)
-{
-    uint32 value;
-    if (bits<DDS_bufsize) {
-        DDS_bufsize -= bits;
-        value = DDS_shiftr(DDS_buffer,DDS_bufsize);
+class DDS_BitReader {
+    mutable uint32 const* begin_;
+    uint32 const* end_;
+    uint32 cache_;
+    uint32 cache_bits_;
+
+    virtual uint32 read_uint32_() const {
+        uint32 v = 0;
+        if (begin_<end_) {
+            v = *begin_++;
+
+            if (DDS_ISINTEL) {
+                v = DDS_swapuint(v);
+            }
+        }
+        return v;
     }
-    else {
-        value = DDS_shiftl(DDS_buffer, bits-DDS_bufsize);
-        if (DDS_cachepos>=DDS_cachesize) {
-            DDS_buffer=0;
+
+public:
+    DDS_BitReader(uint32 const* begin, uint32 const* end):
+        begin_(begin),end_(end),cache_(0),cache_bits_(0) {}
+
+    uint32 readbits(uint32 bits) {
+        uint32 value = 0;
+        if (bits<cache_bits_) {
+            cache_bits_ -= bits;
+            value = DDS_shiftr(cache_, cache_bits_);
         }
         else {
-            DDS_buffer = *((uint32*)&DDS_cache[DDS_cachepos]);
-            if (DDS_ISINTEL)
-                DDS_buffer = DDS_swapuint(DDS_buffer);
-            DDS_cachepos += 4;
+            value = DDS_shiftl(cache_, bits-cache_bits_);
+
+            cache_ = read_uint32_();
+
+            cache_bits_ += 32 - bits;
+            value |= DDS_shiftr(cache_, cache_bits_);
         }
 
-        DDS_bufsize += 32 - bits;
-        value |= DDS_shiftr(DDS_buffer, DDS_bufsize);
+        cache_ &= (DDS_shiftl(1, cache_bits_)-1);
+
+        return value;
     }
-
-    DDS_buffer &= (DDS_shiftl(1, DDS_bufsize)-1);
-
-    return value;
-}
+};
 
 // deinterleave a byte stream
 bool DDS_deinterleave(uint8* data, uint32 bytes, uint32 skip, uint32 block, bool restore)
@@ -155,8 +159,6 @@ bool DDS_deinterleave(uint8* data, uint32 bytes, uint32 skip, uint32 block, bool
     }
     return true;
 }
-// TO-DO : END
-/////////////////////////////////////////////////////////////////////////////////////////
 
 namespace sfg {
 
@@ -170,9 +172,9 @@ inline void* read_file(int64& size, char const* filename) {
             rewind(file);
             void* buffer = NULL;
             if (file_size>0) {
-                buffer = malloc((size_t)file_size);
+                buffer = malloc(file_size);
                 if (buffer) {
-                    if (file_size==fread(buffer, 1, (size_t)file_size, file)) {
+                    if (file_size==fread(buffer, 1, file_size, file)) {
                         size = file_size;
                     }
                     else {
@@ -192,39 +194,35 @@ inline void* read_file(int64& size, char const* filename) {
 bool PVMParser::Load(char const* filename)
 {
     int64 pvm_size = 0;
-    void* pvm = read_file(pvm_size, filename);
+    void* pvm = read_file(pvm_size, filename); // must be 16-bit aligned
     if (pvm) {
         char* header = (char*) pvm;
-        int dds = 0;
+        int is_dds = 0;
         if (pvm_size>8 &&
             (0==memcmp("DDS v3d\n", header, 8) || 0==memcmp("DDS v3e\n", header, 8))) {
-
             unsigned int const block = ('d'==header[6]) ? 0:DDS_INTERLEAVE; 
-            memmove(pvm, header+8, (size_t) pvm_size-8);
+            memmove(pvm, header+8, pvm_size-=8);
+            memset(header+pvm_size, 0, 8);
+            DDS_BitReader DDS((uint32*) header,
+                              (uint32*) (header+((pvm_size+3)&~3))); // round up
 
-            // clear bits
-            DDS_buffer = DDS_bufsize = DDS_cachepos = 0;
-            DDS_cache = (uint8*) header;
-            DDS_cachesize = (uint32) (pvm_size - 8);
-            memset(header+DDS_cachesize, 0, 8);
-
-            uint32 const skip = DDS_readbits(2) + 1;
-            uint32 const strip = DDS_readbits(16) + 1;
+            uint32 const skip = DDS.readbits(2) + 1;
+            uint32 const strip = DDS.readbits(16) + 1;
 
             uint8* ptr1 = NULL;
             uint8* ptr2 = NULL;
             uint32 cnt(0), cnt1(0);
             int bits(0), act(0);
-            while ((cnt1=DDS_readbits(DDS_RL))!=0) {
-                bits = DDS_readbits(3);
+            while ((cnt1=DDS.readbits(DDS_RL))!=0) {
+                bits = DDS.readbits(3);
                 if (bits>0)
                     ++bits;
 
                 for (uint32 cnt2=0; cnt2<cnt1; ++cnt2) {
                     if (strip==1 || cnt<=strip)
-                        act += DDS_readbits(bits)-(1<<bits)/2;
+                        act += DDS.readbits(bits)-(1<<bits)/2;
                     else
-                        act += *(ptr2-strip) - *(ptr2-strip-1) + DDS_readbits(bits)-(1<<bits)/2;
+                        act += *(ptr2-strip) - *(ptr2-strip-1) + DDS.readbits(bits)-(1<<bits)/2;
 
                     while (act<0)
                         act += 256;
@@ -262,7 +260,7 @@ bool PVMParser::Load(char const* filename)
             if (ptr1) {
                 pvm = ptr1;
                 pvm_size = cnt;
-                dds = 1;
+                is_dds = 1;
                 ptr1 = NULL;
             }
             else {
@@ -297,10 +295,6 @@ bool PVMParser::Load(char const* filename)
             // The maximum allowed length for each of these is 256 bytes.
             //
 
-            //
-            // Problem : some
-            //
-            
             char* ptr = header;
             char* const end = ptr + pvm_size;
             if ('\n'==header[3]) {
@@ -426,25 +420,41 @@ bool PVMParser::Load(char const* filename)
 }
 
 //---------------------------------------------------------------------------------------
-bool PVMParser::ReadVoxels_(float* dst, uint8 const* src, int width, int height, int depth, int components)
+bool PVMParser::ReadVoxels_(float* dst, float& inf, float& sup,
+                            uint8 const* src, int cx, int cy, int cz, int components)
 {
-    if (dst && src && width>0 && height>0 && depth>0 && components>0) {
-        int const pixels = width*height*depth;
-        if (2==components) {
-            float const scale = 1.0f/65535.0f;
-            for (int i=0; i<pixels; ++i,++dst,src+=2) {
-                *dst = scale*(256*src[1] + src[0]);
-            }
-            return true;
-        }
-        else if (components>0) {
+    if (dst && src && cx>0 && cy>0 && cz>0 && components>0) {
+        int const pixels = cx*cy*cz;
+        float t;
+        if (1==components) {
             float const scale = 1.0f/255.0f;
-            src += (components - 1);
-            for (int i=0; i<pixels; ++i,++dst,src+=components) {
-                *dst = scale*src[0];
+            inf = sup = scale*(*src++);
+            for (int i=1; i<pixels; ++i) {
+                *dst++ = t = scale*(*src++);
+                if (t<inf)
+                    inf = t;
+                else if (t>sup)
+                    sup = t;
             }
-            return true;
         }
+        else {
+            if (2!=components) {
+                // warning...
+            }
+
+            float const scale = 1.0f/65535.0f;
+            src += (components - 2);
+            inf = sup = scale*(256*src[1] + src[0]); src+=components;
+            for (int i=1; i<pixels; ++i,src+=components) {
+                *dst++ = t = scale*(256*src[1] + src[0]);
+                if (t<inf)
+                    inf = t;
+                else if (t>sup)
+                    sup = t;
+            }
+        }
+
+        return true;
     }
 
     return false;

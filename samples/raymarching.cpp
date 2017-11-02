@@ -135,8 +135,8 @@ public:
         camera_.SetLookAt(math::Vector3(0.0f, -5.0f, 0.0f));
         camera_.SetPerspectiveParam(1.0f, 0.1f, 100.0f);
         window_title_ = "Volume Ray Marching demo by andre.hl.chen@gmail.com";
-        width_ = 1920;
-        height_ = 1080;
+        width_ = 1280;
+        height_ = 720;
     }
     bool Initialize() {
         if (voxelViewer_.Initialize()) {

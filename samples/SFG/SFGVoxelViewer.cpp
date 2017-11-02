@@ -48,10 +48,16 @@ void VoxelViewer::ReadVoxels_(uint8 const* voxels,
 {
     if (description) {
         BL_LOG("Description : %s\n", description);
-        if (courtesy && '\0'!=*courtesy) {
-            BL_LOG("Courtesy : %s\n", courtesy);
-            if (parameters && '\0'!=*parameters) {
-                BL_LOG("Parameters : %s\n", parameters);
+        if (courtesy) {
+            if ('\0'!=*courtesy) {
+                BL_LOG("Courtesy : %s\n", courtesy);
+            }
+
+            if (parameters) {
+                if ('\0'!=*parameters) {
+                    BL_LOG("Parameters : %s\n", parameters);
+                }
+
                 if (comment && '\0'!=*comment) {
                     BL_LOG("Comment : %s\n", comment);
                 }
@@ -65,25 +71,24 @@ void VoxelViewer::ReadVoxels_(uint8 const* voxels,
             char filename[256];
             int const pixels = cx*cy;
             uint8* image = (uint8*) malloc(pixels);
-            voxels += components - 1;
+            uint8 const* src = voxels + components - 1;
             for (int i=0; i<cz; ++i) {
                 uint8* dst = image;
-                for (int j=0; j<pixels; ++j,voxels+=components) {
-                    *dst++ = voxels[0];
+                for (int j=0; j<pixels; ++j,src+=components) {
+                    *dst++ = src[0];
                 }
                 sprintf(filename, "./data/test_pvm/img%03d.jpg", i+1);
                 mlabs::balai::image::write_JPEG(filename, image, cx, cy, 1);
             }
-
             free(image);
         }
 #endif
-
         float* vox = (float*) malloc(cx*cy*cz*sizeof(float));
-        if (PVMParser::ReadVoxels_(vox, voxels, cx, cy, cz, components)) {
-            sizeX_ = cx;
-            sizeY_ = cy;
-            sizeZ_ = cz;
+        if (PVMParser::ReadVoxels_(vox, voxInf_, voxSup_,
+                                   voxels, cx, cy, cz, components)) {
+            sizeX_ = cx; // width
+            sizeY_ = cy; // height
+            sizeZ_ = cz; // depth
 
             scaleX_ = 1.0f; // check!>
             scaleY_ = sy/sx;
@@ -109,17 +114,11 @@ void VoxelViewer::ReadVoxels_(uint8 const* voxels,
             size_t const size_pad_X = sizeX - sizeX_;
             size_t const size_pad_Y = (sizeY - sizeY_)*sizeX;
             size_t const size_pad_Z = (sizeZ - sizeZ_)*sizeXY;
-            float t;
-            int id;
 
             memset(histogram_, 0, sizeof(histogram_));
-            float* magnitude = (float*) malloc(sizeXYZ*sizeof(float));
-            voxels_ = (uint8*) malloc(sizeXYZ*sizeof(uint8));
-            if (NULL==magnitude || NULL==voxels_) {
+            uint8* pixel = voxels_ = (uint8*) malloc(sizeXYZ*sizeof(uint8));
+            if (NULL==voxels_) {
                 free(vox);
-                if (magnitude) {
-                    free(magnitude);
-                }
                 if (voxels_) {
                     free(voxels_);
                     voxels_ = NULL;
@@ -129,72 +128,38 @@ void VoxelViewer::ReadVoxels_(uint8 const* voxels,
                 return;
             }
 
-            float* norm = magnitude;
-            uint8* pixel = voxels_;
-
-            voxInf_ = voxSup_ = *vox;
-            float const* src = vox;
+            memset(voxels_, 0, sizeXYZ*sizeof(uint8));
+            float const scale = 255.0f/(voxSup_-voxInf_);
+            uint8* p = voxels_;
+            int v;
             for (int z=0; STATUS_LOADING==status_&&z<sizeZ_; ++z) {
-                progressing_ = 80*z/sizeZ_;
+                progressing_ = 100*z/sizeZ_;
+                float const* src = vox + (sizeZ_-z-1)*sizeX_*sizeY_;
                 for (int y=0; y<sizeY_; ++y) {
-                    for (int x=0; x<sizeX_; ++x) {
-                        *norm++ = t = *src++;
-                        if (voxInf_>t)
-                            voxInf_ = t;
-                        else if (voxSup_<t)
-                            voxSup_ = t;
+                    for (int x=0; x<sizeX_; ++x,++p,++src) {
+                        v = (int) (((*src)-voxInf_)*scale);
+                        if (0<v) {
+                            if (v<256) {
+                                ++histogram_[*p=v];
+                            }
+                            else {
+                                ++histogram_[*p=255];
+                            }
+                        }
                     }
-
-                    if (0<size_pad_X) {
-                        memset(norm, 0, size_pad_X*sizeof(float));
-                        norm += size_pad_X;
-                    }
+                    p += size_pad_X;
                 }
-
-                if (0<size_pad_Y) {
-                    memset(norm, 0, size_pad_Y*sizeof(float));
-                    norm += size_pad_Y;
-                }
+                p += size_pad_Y;
             }
-
-            if (0<size_pad_Z) {
-                memset(norm, 0, size_pad_Z*sizeof(float));
-                norm += size_pad_Z;
-            }
-
-            free(vox);
-
-            // histogram
-            int const histogram_id_max = sizeof(histogram_)/sizeof(histogram_[0]) - 1;
-            float scale = ((float)histogram_id_max)/(voxSup_-voxInf_);
-            norm = magnitude;
-            for (size_t i=0; i<sizeXYZ; ++i,++norm) {
-                id = (int) (((*norm)-voxInf_)*scale);
-                ++histogram_[(0<=id) ? ((id<=histogram_id_max)? id:histogram_id_max):0];
-            }
-
-            // fill alpha
-            scale = 255.0f/(voxSup_-voxInf_);
-            norm = magnitude;
-            
-            uint8* p = voxels_; // alpha
-            for (int z=0; STATUS_LOADING==status_&&z<sizeZ; ++z) { // Z axis = J axis
-                progressing_ = 80 + 20*z/sizeZ_;
-                for (int y=0; y<sizeY; ++y) { // Y axis = -K axis
-                    for (int x=0; x<sizeX; ++x,++norm,++p) {
-                        id = (int) (((*norm)-voxInf_)*scale);
-                        *p = (id<=255) ? ((0<=id) ? ((uint8)id):0):255;
-                    }
-                }
-            }
-
-            free(magnitude);
+            p += size_pad_Z;
 
             // align up
             sizeX_ = sizeX;
             sizeZ_ = sizeZ;
             sizeY_ = sizeY;
         }
+
+        free(vox);
     }
 }
 //---------------------------------------------------------------------------------------
@@ -310,11 +275,13 @@ bool VoxelViewer::Initialize()
         return false;
     }
 
-    // generate 2 render buffers, default framebuffer size
-    {
+    uint32 const width = Renderer::GetInstance().GetScreenWidth();
+    uint32 const height = Renderer::GetInstance().GetScreenHeight();
+    if (width>0 && height>0) {
         SurfaceGenerator sgen;
         sgen.SetRenderTargetFormat(SURFACE_FORMAT_RGBA16F);
         sgen.SetDepthFormat(SURFACE_FORMAT_D24);
+        sgen.SetSurfaceSize(width, height);
         sgen.SetMultiSampleSamples(1);
         sgen.SetDepthStencilUsage(SurfaceGenerator::DEPTH_STENCIL_USAGE_DEFAULT_READONLY);
 
@@ -353,6 +320,7 @@ void VoxelViewer::Finalize()
 
     BL_SAFE_RELEASE(frontCap_);
     BL_SAFE_RELEASE(backCap_);
+
     BL_SAFE_RELEASE(volumeMap_);
 
     status_ = STATUS_EMPTY;
@@ -530,6 +498,50 @@ bool VoxelViewer::Render(Matrix3 const& matModelView)
     int const slice_start = (int)(slices_*(1.0f - sup.y/rr))/2;
     int const slice_totals = slices_ - 2*slice_start; // by symmetric
 
+#if 0
+    // write depth buffer with farmost
+    renderer.SetCullMode(GFXCULL_FRONT);
+    renderer.SetColorWrite(false);
+    renderer.SetDepthWrite(true);
+    if (prim.BeginDraw(NULL, GFXPT_QUADLIST)) {
+        prim.AddVertex( rx, -ry,  rz);
+        prim.AddVertex( rx, -ry, -rz);
+        prim.AddVertex( rx,  ry, -rz);
+        prim.AddVertex( rx,  ry,  rz);
+
+        prim.AddVertex( rx,  ry,  rz);
+        prim.AddVertex( rx,  ry, -rz);
+        prim.AddVertex(-rx,  ry, -rz);
+        prim.AddVertex(-rx,  ry,  rz);
+
+        prim.AddVertex( rx, -ry,  rz);
+        prim.AddVertex( rx,  ry,  rz);
+        prim.AddVertex(-rx,  ry,  rz);
+        prim.AddVertex(-rx, -ry,  rz);
+
+        prim.AddVertex(-rx,  ry,  rz);
+        prim.AddVertex(-rx,  ry, -rz);
+        prim.AddVertex(-rx, -ry, -rz);
+        prim.AddVertex(-rx, -ry,  rz);
+
+        prim.AddVertex(-rx, -ry,  rz);
+        prim.AddVertex(-rx, -ry, -rz);
+        prim.AddVertex( rx, -ry, -rz);
+        prim.AddVertex( rx, -ry,  rz);
+
+        prim.AddVertex(-rx, -ry, -rz);
+        prim.AddVertex(-rx,  ry, -rz);
+        prim.AddVertex( rx,  ry, -rz);
+        prim.AddVertex( rx, -ry, -rz);
+
+        prim.EndDraw();
+    }
+
+    // actually, we're drawing all slices far to near
+    renderer.SetColorWrite(true);
+    renderer.SetZTest(GFXCMP_LESSEQUAL);
+#endif
+
     //renderer.SetZTestDisable();
     renderer.SetCullDisable(); // cull must disable
 
@@ -550,6 +562,7 @@ bool VoxelViewer::Render(Matrix3 const& matModelView)
     mat._31 *= sR; mat._32 *= sR; mat._33 *= sR;
     mat.SetOrigin(0.5f, 0.5f, 0.5f);
     float const clipping[4] = { sup.x/rr, 1.0f, sup.z/rr, 1.0f };
+
 
     renderer.SetBlendDisable();
     renderer.SetZTest(GFXCMP_LESSEQUAL);
@@ -598,10 +611,10 @@ bool VoxelViewer::Render(Matrix3 const& matModelView)
 #define DEBUG_SHOW_CAP_RENDER_BUFFER
 #ifdef DEBUG_SHOW_CAP_RENDER_BUFFER
             if (prim.BeginDraw(start, GFXPT_SCREEN_QUADLIST)) {
-                prim.AddVertex2D(0.01f, 0.32f, 0.0f, 1.0f);
-                prim.AddVertex2D(0.01f, 0.65f, 0.0f, 0.0f);
-                prim.AddVertex2D(0.34f, 0.65f, 1.0f, 0.0f);
-                prim.AddVertex2D(0.34f, 0.32f, 1.0f, 1.0f);
+                prim.AddVertex2D(0.005f, 0.585f, 0.0f, 1.0f);
+                prim.AddVertex2D(0.005f, 0.785f, 0.0f, 0.0f);
+                prim.AddVertex2D(0.205f, 0.785f, 1.0f, 0.0f);
+                prim.AddVertex2D(0.205f, 0.585f, 1.0f, 1.0f);
                 prim.EndDraw();
             }
 #endif
@@ -610,10 +623,10 @@ bool VoxelViewer::Render(Matrix3 const& matModelView)
 
 #ifdef DEBUG_SHOW_CAP_RENDER_BUFFER
         if (prim.BeginDraw(end, GFXPT_SCREEN_QUADLIST)) {
-            prim.AddVertex2D(0.01f, 0.66f, 0.0f, 1.0f);
-            prim.AddVertex2D(0.01f, 0.99f, 0.0f, 0.0f);
-            prim.AddVertex2D(0.34f, 0.99f, 1.0f, 0.0f);
-            prim.AddVertex2D(0.34f, 0.66f, 1.0f, 1.0f);
+            prim.AddVertex2D(0.005f, 0.79f, 0.0f, 1.0f);
+            prim.AddVertex2D(0.005f, 0.99f, 0.0f, 0.0f);
+            prim.AddVertex2D(0.205f, 0.99f, 1.0f, 0.0f);
+            prim.AddVertex2D(0.205f, 0.79f, 1.0f, 1.0f);
             prim.EndDraw();
         }
 #endif
@@ -625,7 +638,7 @@ bool VoxelViewer::Render(Matrix3 const& matModelView)
     renderer.SetZTestDisable();
     renderer.SetBlendDisable();
     if (prim.BeginDraw(NULL, GFXPT_LINELIST)) {
-        prim.SetColor(128, 128, 128, 255);
+        prim.SetColor(64, 64, 64, 255);
         prim.AddVertex( infX_, -supY_,  supZ_);
         prim.AddVertex( infX_, -supY_,  infZ_);
         prim.AddVertex( infX_, -supY_,  infZ_);
@@ -677,7 +690,7 @@ bool VoxelViewer::Render(Matrix3 const& matModelView)
 bool VoxelViewer::ShowInfo(mlabs::balai::graphics::IAsciiFont* font, bool verbose)
 {
     if (font) {
-        Color const color = Color::Yellow;
+        Color const color = Color::White;
         char text[128];
         switch (status_)
         {
@@ -700,15 +713,35 @@ bool VoxelViewer::ShowInfo(mlabs::balai::graphics::IAsciiFont* font, bool verbos
         case STATUS_READY:
             if (verbose) {
                 float y = 0.01f;
+
                 y += font->DrawText(0.01f, y, 16, color, shortName_);
+
                 sprintf(text, "%dx%dx%d", sizeX_, sizeZ_, sizeY_);
                 y += font->DrawText(0.01f, y, 16, color, text);
-            }
+/*
+                sprintf(text, "[%.4f, %.4f]x[%.4f, %.4f]x[%.4f, %.4f]",
+                        infX_, supX_, infZ_, supZ_, infY_, supY_);
+                y += font->DrawText(0.01f, y, 16, color, text);
+*/
+//                sprintf(text, "time:%.4f", timestamp_);
+//                y += font->DrawText(0.01f, y, 16, color, text);
+
+                y += 0.005f;
+
+                //
+                //sprintf(text, "debug:%d", toggle_debug);
+                //y += font->DrawText(0.01f, y, 16, color, text);
+                //
+
+                //
+                // ...
+                //
 
 #ifdef DEBUG_SHOW_CAP_RENDER_BUFFER
-            font->DrawText(0.02f, 0.64f, 16, Color::White, "Front Face", FONT_ALIGN_BOTTOM);
-            font->DrawText(0.02f, 0.98f, 16, Color::White, "Back Face", FONT_ALIGN_BOTTOM);
+                font->DrawText(0.01f, 0.78f, 16, Color::White, "Front Face", FONT_ALIGN_BOTTOM);
+                font->DrawText(0.01f, 0.985f, 16, Color::White, "Back Face", FONT_ALIGN_BOTTOM);
 #endif
+            }
             break;
 
         case STATUS_LOADING_FAILED:
