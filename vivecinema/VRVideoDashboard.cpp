@@ -290,14 +290,14 @@ void VRVideoPlayer::DrawSubtitle_(mlabs::balai::math::Matrix3 const& xform, int 
                                     0.0f,
                                     screen.z0 - screen.Height()*yOrg/rect.PlayResY);
 
-                    Matrix3 xform1(o.x, o.y, o.z);
-                    xform1.SetEulerAngles(pitch, roll, yaw);
+                    Matrix3 xform(o.x, o.y, o.z);
+                    xform.SetEulerAngles(pitch, roll, yaw);
 
                     par.rotate = 1;
-                    par.v0 = xform1.PointTransform(Vector3(ll, y0, tt)-o);
-                    par.v1 = xform1.PointTransform(Vector3(ll, y0, bb)-o);
-                    par.v2 = xform1.PointTransform(Vector3(rr, y0, bb)-o);
-                    par.v3 = xform1.PointTransform(Vector3(rr, y0, tt)-o);
+                    par.v0 = xform.PointTransform(Vector3(ll, y0, tt)-o);
+                    par.v1 = xform.PointTransform(Vector3(ll, y0, bb)-o);
+                    par.v2 = xform.PointTransform(Vector3(rr, y0, bb)-o);
+                    par.v3 = xform.PointTransform(Vector3(rr, y0, tt)-o);
 
                     TexCoord& tc = par.tc;
                     tc.x0 = s0; tc.x1 = s1;
@@ -519,7 +519,7 @@ void VRVideoPlayer::DrawSubtitle_(mlabs::balai::math::Matrix3 const& xform, int 
                 float const mH = 0.5f*(screen.z0 + screen.z1);
                 if (tt>mH) {
                     // use only the top part
-                    dh = tt - mH;
+                    float const dh = tt - mH;
                     t1 = dh/(tt-bb); 
                     tt = bb + dh;
 
@@ -1019,11 +1019,11 @@ void VRVideoPlayer::ThumbnailDecodeLoop_()
                                 }
 
                                 int lo(255),hi(0),totals(0);
-                                for (int j=0; j<256; ++j) {
-                                    if (histogram[j]>0) {
-                                        totals += histogram[j];
-                                        if (lo>j) lo = j;
-                                        if (hi<j) hi = j;
+                                for (int i=0; i<256; ++i) {
+                                    if (histogram[i]>0) {
+                                        totals += histogram[i];
+                                        if (lo>i) lo = i;
+                                        if (hi<i) hi = i;
                                     }
                                 }
                                 assert((ww*hh)==totals);
@@ -1190,7 +1190,7 @@ void VRVideoPlayer::ThumbnailDecodeLoop_()
             for (int j=0; 0<=menu_page_ && j<MENU_VIDEO_THUMBNAILS; ++j) {
                 int const id = page*MENU_VIDEO_THUMBNAILS + j;
                 if (id<total_videos) {
-                    video = playList_[id];
+                    VideoTrack* video = playList_[id];
                     int const offset = video->ThumbnailCache();
                     assert(offset==(128+(1024*768*3+256)*id));
                     if (-1==video->ThumbnailTextureId() && offset>0) {
@@ -2284,14 +2284,14 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                             //
                             if (video->GetSphericalAngles(longi, lat_inf, lati_sup)) {
                                 // oh boy! it's non-sense, actually:-)
-                                float const crop = (longi>180) ? 0.66f:0.8f;
+                                float const crop_factor = (longi>180) ? 0.66f:0.8f;
                                 s0 = 0.5f*(s0+s1);
-                                s1 = (s1-s0)*crop;
+                                s1 = (s1-s0)*crop_factor;
                                 s0 -= s1;
                                 s1 = s0 + 2.0f*s1;
 
                                 t0 = 0.5f*(t0+t1);
-                                t1 = (t1-t0)*crop;
+                                t1 = (t1-t0)*crop_factor;
                                 t0 -= t1;
                                 t1 = t0 + 2.0f*t1;
                             }
@@ -2414,14 +2414,14 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
 
                             if (is360) {
                                 // oh boy! it's non-sense, actually:-)
-                                float const crop = (longi>180) ? 0.66f:0.8f;
+                                float const crop_factor = (longi>180) ? 0.66f:0.8f;
                                 s0 = 0.5f*(s0+s1);
-                                s1 = (s1-s0)*crop;
+                                s1 = (s1-s0)*crop_factor;
                                 s0 -= s1;
                                 s1 = s0 + 2.0f*s1;
 
                                 t0 = 0.5f*(t0+t1);
-                                t1 = (t1-t0)*crop;
+                                t1 = (t1-t0)*crop_factor;
                                 t0 -= t1;
                                 t1 = t0 + 2.0f*t1;
                             }
@@ -2671,12 +2671,12 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                 }
 
                 if (!isValid) {
-                    float const hh = 0.168f * rect.Height();
-                    float const ww = hh * texcoords_[DRAW_TEXT_ERROR].AspectRatio();
-                    decal.x0 = 0.5f*(rect.x0+rect.x1) - 0.5f*ww;
-                    decal.x1 = decal.x0 + ww;
-                    decal.z0 = (0.33f*rect.z0+0.66f*rect.z1) + 0.5f*hh;
-                    decal.z1 = decal.z0 - hh;
+                    float const dh = 0.168f * rect.Height();
+                    float const dw = dh * texcoords_[DRAW_TEXT_ERROR].AspectRatio();
+                    decal.x0 = 0.5f*(rect.x0+rect.x1) - 0.5f*dw;
+                    decal.x1 = decal.x0 + dw;
+                    decal.z0 = (0.33f*rect.z0+0.66f*rect.z1) + 0.5f*dh;
+                    decal.z1 = decal.z0 - dh;
                     color = Color::Black; color.a = 128;
                     prim.SetColor(color);
                     prim.AddVertex(decal.x0, y, decal.z0);
@@ -2820,12 +2820,12 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                         prim.BeginDraw(GFXPT_QUADLIST);
                     }
 
-                    float const hh = 0.12f*(rect.z0-rect.z1);
-                    float const ww = hh*tc.AspectRatio();
-                    z1 = rect.z1 + 0.1f*hh;
-                    z0 = z1 + hh;
-                    x0 = 0.5f*(rect.x0 + rect.x1) - 0.5f*ww;
-                    x1 = x0 + ww;
+                    float const dh = 0.12f*(rect.z0-rect.z1);
+                    float const dw = dh*tc.AspectRatio();
+                    z1 = rect.z1 + 0.1f*dh;
+                    z0 = z1 + dh;
+                    x0 = 0.5f*(rect.x0 + rect.x1) - 0.5f*dw;
+                    x1 = x0 + dw;
                     prim.SetColor(Color::White);
                     prim.AddVertex(x0, y, z0, tc.x0, tc.y0);
                     prim.AddVertex(x0, y, z1, tc.x0, tc.y1);
@@ -2836,16 +2836,16 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
 
                 prim.BeginDraw(uiGlyph_, GFXPT_QUADLIST);
                 {
-                    TexCoord const& tc1 = texcoords_[DRAW_UI_SETTINGS];
+                    TexCoord const& tc = texcoords_[DRAW_UI_SETTINGS];
                     GetUIWidgetRect_(decal, DRAW_UI_SETTINGS);
                     decal.Move(rect.x0, rect.z0);
                     if (widget_on_>1) {
                         prim.SetColor(viveColor_);
                     }
-                    prim.AddVertex(decal.x0, y, decal.z0, tc1.x0, tc1.y0);
-                    prim.AddVertex(decal.x0, y, decal.z1, tc1.x0, tc1.y1);
-                    prim.AddVertex(decal.x1, y, decal.z1, tc1.x1, tc1.y1);
-                    prim.AddVertex(decal.x1, y, decal.z0, tc1.x1, tc1.y0);
+                    prim.AddVertex(decal.x0, y, decal.z0, tc.x0, tc.y0);
+                    prim.AddVertex(decal.x0, y, decal.z1, tc.x0, tc.y1);
+                    prim.AddVertex(decal.x1, y, decal.z1, tc.x1, tc.y1);
+                    prim.AddVertex(decal.x1, y, decal.z0, tc.x1, tc.y0);
                 }
 
                 if (widget_full_open) {
@@ -2859,20 +2859,20 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                     prim.AddVertex(decal.x1, y, decal.z1, tc.x1, tc.y1);
                     prim.AddVertex(decal.x1, y, decal.z0, tc.x1, tc.y0);
 
-                    float ww = decal.Height()*tb.AspectRatio();
+                    float dw = decal.Height()*tb.AspectRatio();
                     if (3==widget_on_ && widget_elapsed_time<animation_duration_) {
                         float alpha = widget_elapsed_time/animation_duration_;
                         alpha *= alpha;
                         if (VIDEO_3D_MONO==s3D)
                             alpha = 1.0f - alpha;
 
-                        decal.x0 += alpha*(decal.Width() - ww);
+                        decal.x0 += alpha*(decal.Width() - dw);
                     }
                     else {
                         if (VIDEO_3D_MONO!=s3D)
-                            decal.x0 = decal.x1 - ww;
+                            decal.x0 = decal.x1 - dw;
                     }
-                    decal.x1 = decal.x0 + ww;
+                    decal.x1 = decal.x0 + dw;
                     prim.SetColor(Color::White);
                     prim.AddVertex(decal.x0, y, decal.z0, tb.x0, tb.y0);
                     prim.AddVertex(decal.x0, y, decal.z1, tb.x0, tb.y1);
@@ -2888,19 +2888,19 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                     prim.AddVertex(decal.x1, y, decal.z1, tc.x1, tc.y1);
                     prim.AddVertex(decal.x1, y, decal.z0, tc.x1, tc.y0);
 
-                    ww = decal.Height()*tb.AspectRatio();
+                    dw = decal.Height()*tb.AspectRatio();
                     if ((5==widget_on_ || 7==widget_on_) && widget_elapsed_time<animation_duration_) {
                         float alpha = widget_elapsed_time/animation_duration_;
                         alpha *= alpha;
                         if (!is360)
                             alpha = 1.0f - alpha;
-                        decal.x0 += alpha*(decal.Width() - ww);
+                        decal.x0 += alpha*(decal.Width() - dw);
                     }
                     else {
                         if (is360)
-                            decal.x0 = decal.x1 - ww;
+                            decal.x0 = decal.x1 - dw;
                     }
-                    decal.x1 = decal.x0 + ww;
+                    decal.x1 = decal.x0 + dw;
                     prim.SetColor(Color::White);
                     prim.AddVertex(decal.x0, y, decal.z0, tb.x0, tb.y0);
                     prim.AddVertex(decal.x0, y, decal.z1, tb.x0, tb.y1);
@@ -3754,13 +3754,13 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
         }
 
         // next track
-        int const total_videos = playList_.size();
+        int const totals = playList_.size();
         bool show_next_track = false;
         bool show_volume_bar = false;
         float master_volume = 0.0f;
         float timestamp_left = rect.x1;
         Rectangle rectNextTrack;
-        if (total_videos>1 && GetUIWidgetRect_(rectNextTrack, DRAW_UI_NEXT)) {
+        if (totals>1 && GetUIWidgetRect_(rectNextTrack, DRAW_UI_NEXT)) {
             TexCoord const& tc = texcoords_[DRAW_UI_NEXT];
             y_jump = (10==widget_on_) ? popup:0.0f;
             prim.AddVertex(rectNextTrack.x0, y_jump, rectNextTrack.z0, tc.x0, tc.y0);
@@ -3873,7 +3873,7 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
 
             if (0.0f<DashboardPickTest_(cursor_x, cursor_z, focus_controller_) &&
                 (cursor_z<widget_top_ || 5==widget_on_ || 6==widget_on_)) {
-                if (total_videos>1 && 0==on_processing_) {
+                if (totals>1 && 0==on_processing_) {
                     show_next_track = rectNextTrack.In(cursor_x, cursor_z);
                 }
 
@@ -4044,10 +4044,11 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
         if (show_next_track) {
             VideoTrack* next = NULL;
             VideoTrack* prev = NULL;
-            for (int i=0; i<total_videos; ++i) {
+            int const totals = playList_.size();
+            for (int i=0; i<totals; ++i) {
                 if (playList_[i]==current_track_) {
-                    next = playList_[(i+1)%total_videos];
-                    prev = playList_[(i+total_videos-1)%total_videos];
+                    next = playList_[(i+1)%totals];
+                    prev = playList_[(i+totals-1)%totals];
                 }
             }
 

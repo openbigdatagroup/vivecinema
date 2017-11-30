@@ -292,7 +292,6 @@ bool VRVideoPlayer::SphereGeometry::Create(int longitude, int latitude_south, in
             // south
             if (latitude_south<=-90) {
                 uint16 const s_pole_id = uint16(vertexCnt - 1);
-// note C++17   if constexpr (NUM_LATITUDES&1) {
                 if (NUM_LATITUDES&1) { // forward
                     uint16 const id0 = id = s_pole_id - NUM_LONGITUDES;
                     for (int j=0; j<NUM_LONGITUDES; ++j) {
@@ -562,7 +561,7 @@ bool VRVideoPlayer::Playback_(VideoTrack* track)
 #if 1
     on_processing_time_start_ = (float) mlabs::balai::system::GetTime();
     on_processing_ = 0x1000;
-    std::async([this,track] {
+    std::async(std::launch::async, [this,track] {
         VideoOpenOption param;
         track->GetVideoParams(param);
         param.IsLiveStream = track->IsLiveStream();
@@ -1733,13 +1732,13 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
     sx = font_texture_size - font_put_x;
     sy = font_texture_size - font_put_y;
     ptr = buffer + font_put_y*font_texture_size + font_put_x;
-    short_len = swprintf(wfullpath, 256, L"Video Path %s", path);
+    short_len = swprintf(wfullpath, 256, L"%s", path);
     if (fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, wfullpath, (int)short_len)) {
-        TexCoord& tc1 = texcoords_[DRAW_TEXT_VIDEO_PATH];
-        tc1.x0 = (float)font_put_x/(float)font_texture_size;
-        tc1.y0 = (float)font_put_y/(float)font_texture_size;
-        tc1.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
-        tc1.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
+        TexCoord& tc = texcoords_[DRAW_TEXT_VIDEO_PATH];
+        tc.x0 = (float)font_put_x/(float)font_texture_size;
+        tc.y0 = (float)font_put_y/(float)font_texture_size;
+        tc.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
+        tc.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
         ++text_count;
         font_put_x += sx;
         if (font_put_row<(font_put_y+sy))
@@ -1751,24 +1750,24 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         ptr = buffer + font_put_y*font_texture_size;
         sx = font_texture_size;
         sy = font_texture_size - font_put_y;
-        TexCoord& tc1 = texcoords_[DRAW_TEXT_VIDEO_PATH];
+        TexCoord& tc = texcoords_[DRAW_TEXT_VIDEO_PATH];
         if (fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, wfullpath, (int)short_len)) {
-            tc1.x0 = (float)font_put_x/(float)font_texture_size;
-            tc1.y0 = (float)font_put_y/(float)font_texture_size;
-            tc1.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
-            tc1.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
+            tc.x0 = (float)font_put_x/(float)font_texture_size;
+            tc.y0 = (float)font_put_y/(float)font_texture_size;
+            tc.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
+            tc.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
             ++text_count;
             font_put_x = sx;
             if (font_put_row<(font_put_y+sy))
                 font_put_row = (font_put_y+sy);
         }
         else {
-            tc1.x0 = tc1.y0 = tc1.x1 = tc1.y1 = 0.0f; // failed
+            tc.x0 = tc.y0 = tc.x1 = tc.y1 = 0.0f; // failed
         }
     }
 
     for (int i=DRAW_TEXT_NO_VIDEOS; i<DRAW_TEXT_TOTALS; ++i) {
-        TexCoord& tc1 = texcoords_[i];
+        TexCoord& tc = texcoords_[i];
         char const* text = text_out[i];
         int const len = (int) strlen(text);
 
@@ -1777,10 +1776,10 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         ptr = buffer + font_put_y*font_texture_size + font_put_x;
 
         if (fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, text, len)) {
-            tc1.x0 = (float)font_put_x/(float)font_texture_size;
-            tc1.y0 = (float)font_put_y/(float)font_texture_size;
-            tc1.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
-            tc1.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
+            tc.x0 = (float)font_put_x/(float)font_texture_size;
+            tc.y0 = (float)font_put_y/(float)font_texture_size;
+            tc.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
+            tc.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
             ++text_count;
             font_put_x += sx;
             if (font_put_row<(font_put_y+sy))
@@ -1793,23 +1792,23 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
             sx = font_texture_size;
             sy = font_texture_size - font_put_y;
             if (fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, text, len)) {
-                tc1.x0 = (float)font_put_x/(float)font_texture_size;
-                tc1.y0 = (float)font_put_y/(float)font_texture_size;
-                tc1.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
-                tc1.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
+                tc.x0 = (float)font_put_x/(float)font_texture_size;
+                tc.y0 = (float)font_put_y/(float)font_texture_size;
+                tc.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
+                tc.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
                 ++text_count;
                 font_put_x = sx;
                 if (font_put_row<(font_put_y+sy))
                     font_put_row = (font_put_y+sy);
             }
             else {
-                tc1.x0 = tc1.y0 = tc1.x1 = tc1.y1 = 0.0f; // failed
+                tc.x0 = tc.y0 = tc.x1 = tc.y1 = 0.0f; // failed
             }
         }
     }
 
     for (int i=0; i<ISO_639_TOTALS; ++i) {
-        TexCoord& tc1 = texcoords_[DRAW_GLYPH_TOTALS+i];
+        TexCoord& tc = texcoords_[DRAW_GLYPH_TOTALS+i];
         ISO_639 const cur_lan = (ISO_639) i;
         char const* text = GetNativeLanuguageUTF8(cur_lan);
         if (ISO_639_UNKNOWN!=cur_lan && lan!=cur_lan) {
@@ -1825,7 +1824,7 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         }
 
         if (len<=0) {
-            tc1.x0 = tc1.x1 = tc1.y0 = tc1.y1 = 0.0f;
+            tc.x0 = tc.x1 = tc.y0 = tc.y1 = 0.0f;
             continue;
         }
 
@@ -1834,10 +1833,10 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         ptr = buffer + font_put_y*font_texture_size + font_put_x;
 
         if (fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, wfilename, len)) {
-            tc1.x0 = (float)font_put_x/(float)font_texture_size;
-            tc1.y0 = (float)font_put_y/(float)font_texture_size;
-            tc1.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
-            tc1.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
+            tc.x0 = (float)font_put_x/(float)font_texture_size;
+            tc.y0 = (float)font_put_y/(float)font_texture_size;
+            tc.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
+            tc.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
             ++text_count;
             font_put_x += sx;
             if (font_put_row<(font_put_y+sy))
@@ -1850,10 +1849,10 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
             sx = font_texture_size;
             sy = font_texture_size - font_put_y;
             if (fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, wfilename, len)) {
-                tc1.x0 = (float)font_put_x/(float)font_texture_size;
-                tc1.y0 = (float)font_put_y/(float)font_texture_size;
-                tc1.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
-                tc1.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
+                tc.x0 = (float)font_put_x/(float)font_texture_size;
+                tc.y0 = (float)font_put_y/(float)font_texture_size;
+                tc.x1 = (float)(font_put_x+sx)/(float)font_texture_size;
+                tc.y1 = (float)(font_put_y+sy)/(float)font_texture_size;
                 ++text_count;
                 font_put_x = sx;
                 if (font_put_row<(font_put_y+sy))
@@ -2536,13 +2535,13 @@ bool VRVideoPlayer::FrameMove()
 
         on_processing_ = 0x1004; // trying to play
         on_processing_time_start_ = (float) mlabs::balai::system::GetTime();
-        std::async([this,timeat] {
+        std::async(std::launch::async, [this,timeat] {
             decoder_.PlayAt(timeat);
             if (0x1004==on_processing_) {
                 on_processing_ = 0;
             }
             else {
-                BL_LOG("PlayAt(%dms) has been interrupted(0x%X)!\n", timeat, (unsigned int) on_processing_);
+                BL_LOG("PlayAt(%dms) has been interrupted(0x%X)!\n", timeat, (uint32)on_processing_);
             }
         });
 
@@ -2641,16 +2640,16 @@ bool VRVideoPlayer::FrameMove()
             6==widget_on_) {  // seeking (playing mode)
             if (5==widget_on_ || 6==widget_on_) {
                 bool const doplay = 6==widget_on_ && !decoder_.NearlyEnd();
-                //BL_LOG("async EndVideoSeeking(%d)#1... 0x%X\n", doplay, on_processing_);
+                //BL_LOG("async EndVideoSeeking(%d)#1... 0x%X\n", doplay, (uint32) on_processing_);
                 on_processing_ = 0x8004;
                 on_processing_time_start_ = current_time;
-                std::async([this,doplay] {
+                std::async(std::launch::async, [this,doplay] {
                     decoder_.EndVideoSeeking(doplay);
                     if (0x8004==on_processing_) {
                         on_processing_ = 0;
                     }
                     else {
-                        BL_LOG("EndVideoSeeking(%d)#1 has been interrupted!(0x%X)\n", doplay, (unsigned int) on_processing_);
+                        BL_LOG("EndVideoSeeking(%d)#1 has been interrupted!(0x%X)\n", doplay, (uint32) on_processing_);
                     }
                 });
             }
@@ -2697,17 +2696,17 @@ bool VRVideoPlayer::FrameMove()
         trigger_dashboard_ = trigger_dashboard_align_ = 0;
         if (5==widget_on_ || 6==widget_on_) {
             bool const doplay = 6==widget_on_ && !decoder_.NearlyEnd();
-            //BL_LOG("async EndVideoSeeking(%d)#2...0x%X\n", doplay, on_processing_);
+            //BL_LOG("async EndVideoSeeking(%d)#2...0x%X\n", doplay, (uint32) on_processing_);
             on_processing_ = 0x8004;
             on_processing_time_start_ = current_time;
-            std::async([this,doplay] {
+            std::async(std::launch::async, [this,doplay] {
                 decoder_.EndVideoSeeking(doplay);
                 if (0x8004==on_processing_) {
                     //BL_LOG(" Done#2\n", doplay);
                     on_processing_ = 0;
                 }
                 else {
-                    BL_LOG("EndVideoSeeking(%d)#2 has been interrupted(0x%X)!\n", doplay, (unsigned int) on_processing_);
+                    BL_LOG("EndVideoSeeking(%d)#2 has been interrupted(0x%X)!\n", doplay, (uint32) on_processing_);
                 }
             });
             widget_on_ = 4;
@@ -2772,16 +2771,16 @@ bool VRVideoPlayer::FrameMove()
             bool hold_off = false;
             if (5==widget_on_ || 6==widget_on_) {
                 bool const doplay = 6==widget_on_ && !decoder_.NearlyEnd();
-                //BL_LOG("async EndVideoSeeking(%d)#3...0x%X\n", doplay, on_processing_);
+                //BL_LOG("async EndVideoSeeking(%d)#3...0x%X\n", doplay, (uint32) on_processing_);
                 on_processing_ = 0x8004;
                 on_processing_time_start_ = current_time;
-                std::async([this,doplay] {
+                std::async(std::launch::async, [this,doplay] {
                     decoder_.EndVideoSeeking(doplay);
                     if (0x8004==on_processing_) {
                         on_processing_ = 0;
                     }
                     else {
-                        BL_LOG("EndVideoSeeking(%d)#3 has been interrupted(0x%X)!\n", doplay, (unsigned int) on_processing_);
+                        BL_LOG("EndVideoSeeking(%d)#3 has been interrupted(0x%X)!\n", doplay, (uint32) on_processing_);
                     }
                 });
                 hold_off = !doplay;
@@ -2828,16 +2827,16 @@ bool VRVideoPlayer::FrameMove()
             }
             else if (5==widget_on_||6==widget_on_) {
                 bool const doplay = 6==widget_on_ && !decoder_.NearlyEnd();
-                //BL_LOG("async EndVideoSeeking(%d)#4...0x%X\n", doplay, on_processing_);
+                //BL_LOG("async EndVideoSeeking(%d)#4...0x%X\n", doplay, (uint32) on_processing_);
                 on_processing_ = 0x8004;
                 on_processing_time_start_ = current_time;
-                std::async([this,doplay] {
+                std::async(std::launch::async, [this,doplay] {
                     decoder_.EndVideoSeeking(doplay);
                     if (0x8004==on_processing_) {
                         on_processing_ = 0;
                     }
                     else {
-                        BL_LOG("EndVideoSeeking(%d)#4 has been interrupted(0x%X)!\n", doplay, (unsigned int) on_processing_);
+                        BL_LOG("EndVideoSeeking(%d)#4 has been interrupted(0x%X)!\n", doplay, (uint32) on_processing_);
                     }
                 });
                 widget_on_ = 4;
@@ -2880,13 +2879,13 @@ bool VRVideoPlayer::FrameMove()
             widget_timer_ = proc;
             on_processing_ = 0x8002;
             int const timestamp = (int) (widget_timer_*decoder_.GetDuration());
-            std::async([this,timestamp] {
+            std::async(std::launch::async, [this,timestamp] {
                 decoder_.SeekVideoFrame(timestamp);
                 if (0x8002==on_processing_) {
                     on_processing_ = 0;
                 }
                 else {
-                    BL_LOG("SeekVideoFrame(%dms) has been interrupted(0x%X)!\n", timestamp, (unsigned int) on_processing_);
+                    BL_LOG("SeekVideoFrame(%dms) has been interrupted(0x%X)!\n", timestamp, (uint32) on_processing_);
                 }
             });
         }
@@ -2940,13 +2939,13 @@ bool VRVideoPlayer::FrameMove()
                                 if (i<total_subtitle_streams_) {
                                     int const sid = subStmIDs_[i];
                                     current_track_->SetSubtitleStreamID(sid);
-                                    std::async([this, sid] {
+                                    std::async(std::launch::async, [this, sid] {
                                         decoder_.SetSubtitleStream(sid);
                                     });
                                 }
                                 else {
                                     current_track_->SetSubtitleStreamID(-1);
-                                        std::async([this] {
+                                    std::async(std::launch::async, [this] {
                                         decoder_.SetSubtitleStream(-1);
                                     });
                                     widget_on_ = 2;
@@ -2957,7 +2956,7 @@ bool VRVideoPlayer::FrameMove()
                                 if (i<total_audio_streams_) {
                                     int const aid = lanStmIDs_[i];
                                     current_track_->SetAudioStreamID(aid);
-                                    std::async([this, aid] {
+                                    std::async(std::launch::async, [this, aid] {
                                         decoder_.SetAudioStream(aid);
                                     });
                                 }
@@ -3047,18 +3046,18 @@ bool VRVideoPlayer::FrameMove()
                 int const attime = (int) (widget_timer_*decoder_.GetDuration());
                 on_processing_ = 0x8000;
                 on_processing_time_start_ = current_time;
-                std::async([this,attime] {
+                std::async(std::launch::async, [this,attime] {
                     decoder_.StartVideoSeeking(attime);
                     if (0x8000==on_processing_) {
                         // first seek could be slow??? (FFmpeg 3.1.5)
                         for (int i=0;
-                            i<50 && decoder_.IsSeeking() && decoder_.DecodingVideoFrame()<=0; ++i) {
-                            Sleep(100);
+                            i<1000 && decoder_.IsSeeking() && decoder_.DecodingVideoFrame()<=0; ++i) {
+                            Sleep(10);
                         }
                         on_processing_ = 0;
                     }
                     else {
-                        BL_LOG("StartVideoSeeking(%dms) has been interrupted(0x%X)!\n", attime, (unsigned int) on_processing_);
+                        BL_LOG("StartVideoSeeking(%dms) has been interrupted(0x%X)!\n", attime, (uint32) on_processing_);
                     }
                 });
             }
@@ -3082,13 +3081,13 @@ bool VRVideoPlayer::FrameMove()
                         case DRAW_UI_REPLAY:
                             on_processing_ = 0x2000;
                             on_processing_time_start_ = current_time;
-                            std::async([this] {
+                            std::async(std::launch::async, [this] {
                                 decoder_.Replay();
                                 if (0x2000==on_processing_) {
                                     on_processing_ = 0;
                                 }
                                 else {
-                                    BL_LOG("Replay() has been interrupted(0x%X)!\n", (unsigned int) on_processing_);
+                                    BL_LOG("Replay() has been interrupted(0x%X)!\n", (uint32) on_processing_);
                                 }
                             });
                             break;
@@ -3112,9 +3111,9 @@ bool VRVideoPlayer::FrameMove()
                                 }
 
                                 int current_id = -1;
-                                for (int j=0; j<total_videos; ++j) {
-                                    if (playList_[j]==current_track_) {
-                                        current_id = (j+1)%total_videos;
+                                for (int i=0; i<total_videos; ++i) {
+                                    if (playList_[i]==current_track_) {
+                                        current_id = (i+1)%total_videos;
                                         break;
                                     }
                                 }

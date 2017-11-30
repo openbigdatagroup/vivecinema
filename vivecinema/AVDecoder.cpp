@@ -50,7 +50,7 @@ extern "C" {
 #include "libavutil/opt.h"      // av_opt_set_int
 }
 
-#include <future> // std::async, std::future
+//#include <future> // std::async, std::future
 //#include <chrono> // condition_variable::wait_for()
 /*
     // C++11
@@ -373,6 +373,15 @@ namespace mlabs { namespace balai { namespace video {
 // FFmpeg and other decoder initializer & management
 static FFmpegHWAccelInitializer FFmpegHWAccelInitializer_;
 
+/////////////////////////////////////////////////////////////////////////////////////////
+//#define TEST_AMF_FAIL_CASE
+#ifdef TEST_AMF_FAIL_CASE
+int64_t firstKeyframePTS(0), firstKeyframeDTS(0);
+int packet_sn(0), keyframe_packets(0), corrupt_packets(0), discard_packets(0);
+int debug_AMF_my_brothers_keeper_time_at = 448119; // My Brother's Keeper H265 Spatial Audio 17_0418.mp4
+#endif
+/////////////////////////////////////////////////////////////////////////////////////////
+
 //---------------------------------------------------------------------------------------
 AVPixelFormat VideoDecoder::s_get_format_(AVCodecContext* avctx, AVPixelFormat const* pix_fmts)
 {
@@ -632,6 +641,11 @@ void VideoDecoder::Flush()
 
     packet_cnt_ = frame_cnt_ = 0;
     av_frame_unref(&frame_);
+
+#ifdef TEST_AMF_FAIL_CASE
+    firstKeyframePTS = firstKeyframeDTS = 0;
+    packet_sn = keyframe_packets = corrupt_packets = discard_packets = 0;
+#endif
 }
 //---------------------------------------------------------------------------------------
 bool VideoDecoder::can_send_packet() const
@@ -661,7 +675,61 @@ bool VideoDecoder::can_receive_frame(int64_t& pts, int64_t& dur) const
 }
 //---------------------------------------------------------------------------------------
 bool VideoDecoder::send_packet(AVPacket const& pkt)
-{
+{/*
+    static int64_t iframe_size = 0;
+    static int64_t niframe_size = 0;
+    static int iframes = 0;
+    static int niframes = 0;
+    if (pkt.flags&AV_PKT_FLAG_KEY) {
+        iframe_size += pkt.size;
+        ++iframes;
+    }
+    else {
+        niframe_size += pkt.size;
+        ++niframes;
+    }
+
+    if (0==((iframes+niframes)%100)) {
+        int64_t ifr = iframe_size/iframes;
+        int64_t nifr = niframe_size/niframes;
+        BL_LOG("iframe:%.1f%%  %lld vs %lld ratio:%.1f\n",
+               100.0f*iframes/(iframes+niframes), ifr, nifr, double(ifr)/nifr);
+    }
+*/
+#ifdef TEST_AMF_FAIL_CASE
+    ++packet_sn;
+    if (pkt.flags&AV_PKT_FLAG_KEY) {
+        if (1==++keyframe_packets) {
+            firstKeyframePTS = pkt.pts;
+            firstKeyframeDTS = pkt.dts;
+        }
+        BL_LOG("[send_packet] #%04d k pts:%lld(%+lld) dts:%lld(%+lld) size:%d bytes  ", packet_sn,
+               pkt.pts, pkt.pts-firstKeyframePTS, pkt.dts, pkt.dts-firstKeyframeDTS, pkt.size);
+    }
+    else if (pkt.flags&AV_PKT_FLAG_CORRUPT) {
+        ++corrupt_packets;
+        BL_LOG("[send_packet] #%04d c pts:%lld(%+lld) dts:%lld(%+lld)  ", packet_sn,
+               pkt.pts, pkt.pts-firstKeyframePTS, pkt.dts, pkt.dts-firstKeyframeDTS);
+    }
+    else if (pkt.flags&AV_PKT_FLAG_DISCARD) {
+        ++discard_packets;
+        BL_LOG("[send_packet] #%04d d pts:%lld(%+lld) dts:%lld(%+lld)  ", packet_sn,
+               pkt.pts, pkt.pts-firstKeyframePTS, pkt.dts, pkt.dts-firstKeyframeDTS);
+    }
+    else {
+        BL_LOG("[send_packet] #%04d - pts:%lld(%+lld) dts:%lld(%+lld)  ", packet_sn,
+               pkt.pts, pkt.pts-firstKeyframePTS, pkt.dts, pkt.dts-firstKeyframeDTS);
+/*
+        if (pkt.pts<firstKeyframePTS) {
+            return true;
+        }
+        else {
+
+        }
+*/
+    }
+#endif
+
     if (NULL!=pImp_) {
         if (pImp_->send_packet(pkt)) {
             ++packet_cnt_;
@@ -1212,6 +1280,9 @@ bool AVDecoder::DoOpen_(AVFormatContext* fmtCtx,  char const* url, VideoOpenOpti
         // movie resolution
         subtitleUtil_.SetMoiveResolution(videoWidth_, videoHeight_);
 
+        // video decoder
+        videoDecoder_.Init(stream, videoWidth_, videoHeight_);
+
         // allocate pixel buffer
         videoFrameDataSize_ = av_image_get_buffer_size(AV_PIX_FMT_NV12, videoWidth_, videoHeight_, 4);
         int const videoBufferSize = videoFrameDataSize_*NUM_VIDEO_BUFFER_FRAMES;
@@ -1680,7 +1751,7 @@ bool AVDecoder::Open(IInputStream* is, VideoOpenOption const* param)
             }
 
             if (0==error) {
-                if (DoOpen_(fmtCtx, is->Name(), param)) {
+                if (DoOpen_(fmtCtx, is->URL(), param)) {
                     is->AddRef();
                     inputStream_ = is;
                     return true;
@@ -2710,8 +2781,7 @@ bool AVDecoder::AudioAndSubtitleThread_()
     SubtitleDecodeRAII subtitleRAII;
     AVCodecContext* subtitleCodecCtx = NULL;
     int const first_SRT_streams_index = (int) formatCtx_->nb_streams;
-    int subtitleJobId = subtitlePut_ = subtitleGet_ = 0;
-
+    subtitlePut_ = subtitleGet_ = 0;
     int src_video_width  = 1280;
     int dst_video_width  = 1280;
     int src_video_height = 720;
@@ -2862,9 +2932,6 @@ bool AVDecoder::AudioAndSubtitleThread_()
     // decoding loop
     AVPacketList* pk = NULL;
     while (STATUS_PLAYING==status_ && 0==interruptRequest_) {
-//        int64_t const curr_time = av_gettime();
-//        int64_t const curr_pts = (0!=timeStartSysTime_) ? (curr_time - timeStartSysTime_):0;
-        bool take_nap = (0==timeInterruptSysTime_);
         if (audio_on && audioBufferPut_<(audioBufferGet_+audioBufferWrapSize_)) {
 #ifdef DEBUG_AUDIO_DECODE_BENCHMARK
             t1 = mlabs::balai::system::GetTime();
@@ -3070,7 +3137,6 @@ bool AVDecoder::AudioAndSubtitleThread_()
                         if (pk->pkt.stream_index==audio_base.StreamId()) {
                             audio_base.ReadPacket(&(pk->pkt));
                             ReleaseAVPacketList_(pk);  pk = NULL;
-                            take_nap = false; // let's move, move, move!
                         }
                         else {
                             pts1 = audio_base.StreamChanged(&(pk->pkt));
@@ -3102,10 +3168,6 @@ bool AVDecoder::AudioAndSubtitleThread_()
                         }
                     }
                 }
-            }
-
-            if (take_nap && audioBufferPut_<(audioBufferGet_+(audioBufferWrapSize_*8/10))) {
-                take_nap = false;
             }
 
             pk = audioQueueExt1_.Get();
@@ -3198,56 +3260,61 @@ bool AVDecoder::AudioAndSubtitleThread_()
                     FlushQueue_(subtitleQueue_);
                 }
             }
-
             subtitleBufferFlushing_ = 0;
         }
 
-        // (asynchronized) subtitle decoding
-        if (0<=subtitleStreamIndex_ && subtitleGet_>=subtitleJobId) {
+        //
+        // subtitle decoding...
+        //
+        // Note the subtitle decoding can be fully parallelized. I was using std::async() both for
+        // softsub and hardsub decoding. (the hardsub takes < 5ms and softsub take 1ms to 20ms)
+        //
+        // According to C++ standard, If the std::future obtained from std::async is not moved
+        // from or bound to a reference, the destructor of the std::future will BLOCK at the end
+        // of the full expression until the asynchronous operation completes.
+        // see http://en.cppreference.com/w/cpp/thread/async
+        //
+        // Although, std::async() does not block by the temp std::feature object in visual studio 2012.
+        //
+        if (0<=subtitleStreamIndex_ && subtitleGet_==subtitlePut_) {
             pk = subtitleQueue_.Get();
             if (NULL!=pk) {
+                // hardsub
                 assert(subtitleStreamIndex_<first_SRT_streams_index);
                 assert(NULL!=subtitleCodecCtx && pk->pkt.stream_index==subtitleStreamIndex_);
                 if (NULL!=subtitleCodecCtx && pk->pkt.stream_index==subtitleStreamIndex_) {
-                    subtitleJobId = subtitlePut_ + 1;
-                    std::async([this, subtitleCodecCtx, pk, &subtitleRAII, &subtitleJobId, src_video_width, src_video_height, dst_video_width, dst_video_height] {
-
 #ifdef DEBUG_SUBTITLE_DECODE_BENCHMARK
-                        double const t0 = mlabs::balai::system::GetTime();
+                    double const t0 = mlabs::balai::system::GetTime();
 #endif
-                        std::lock_guard<std::mutex> lock(subtitleMutex_);
-                        AVPacket& packet = pk->pkt;
-                        AVSubtitle sub; memset(&sub, 0, sizeof(sub));
-                        int got_sub = 0;
-                        got_sub = (0<avcodec_decode_subtitle2(subtitleCodecCtx, &sub, &got_sub, &packet)) && got_sub;
+                    std::lock_guard<std::mutex> lock(subtitleMutex_);
+                    AVPacket& packet = pk->pkt;
+                    AVSubtitle sub; memset(&sub, 0, sizeof(sub));
+                    int got_sub = 0;
+                    got_sub = (0<avcodec_decode_subtitle2(subtitleCodecCtx, &sub, &got_sub, &packet)) && got_sub;
 
-                        int64_t pkt_pts = AV_NOPTS_VALUE;
-                        int pkt_dur = 0;
-                        if (got_sub) {
-                            if (AV_NOPTS_VALUE!=packet.pts) {
-                                pkt_pts = av_rescale_q(packet.pts, av_codec_get_pkt_timebase(subtitleCodecCtx), timebase_q);
-                            }
-                            else if (AV_NOPTS_VALUE!=packet.dts) {
-                                pkt_pts = av_rescale_q(packet.dts, av_codec_get_pkt_timebase(subtitleCodecCtx), timebase_q);
-                            }
-
-                            if (packet.duration>0) {
-                                pkt_dur = (int) (1000.0*(av_q2d(av_codec_get_pkt_timebase(subtitleCodecCtx))*packet.duration));
-                            }
+                    int64_t pkt_pts = AV_NOPTS_VALUE;
+                    int pkt_dur = 0;
+                    if (got_sub) {
+                        if (AV_NOPTS_VALUE!=packet.pts) {
+                            pkt_pts = av_rescale_q(packet.pts, av_codec_get_pkt_timebase(subtitleCodecCtx), timebase_q);
+                        }
+                        else if (AV_NOPTS_VALUE!=packet.dts) {
+                            pkt_pts = av_rescale_q(packet.dts, av_codec_get_pkt_timebase(subtitleCodecCtx), timebase_q);
                         }
 
-                        ReleaseAVPacketList_(pk);
-                        if (!got_sub) {
-                            subtitleJobId = subtitlePut_;
-                            return;
+                        if (packet.duration>0) {
+                            pkt_dur = (int) (1000.0*(av_q2d(av_codec_get_pkt_timebase(subtitleCodecCtx))*packet.duration));
                         }
+                    }
 
+                    ReleaseAVPacketList_(pk);
+
+                    if (got_sub) {
                         subtitleGraphicsFmt_ = (0==sub.format) ? 4:1; // is graphics format
                         AVSubtitleType const type = (sub.num_rects>0) ? (sub.rects[0]->type):SUBTITLE_NONE;
                         subtitleWidth_ = subtitleHeight_ = subtitleRectCount_ = 0;
                         uint8_t* ptr = subtitleBuffer_;
                         int rects(0), xx(0), yy(0);
-
                         for (unsigned i=0; i<sub.num_rects; ++i) {
                             AVSubtitleRect* rt = sub.rects[i];
                             if (SUBTITLE_BITMAP==rt->type) {
@@ -3310,11 +3377,11 @@ bool AVDecoder::AudioAndSubtitleThread_()
                                                                 rect_w, rect_h, rt->data, rt->linesize, rt->h);
                                     if (NULL!=blendLayer &&
                                         blend_subrectRGBA8(subtitleBuffer_, subtitleBufferSize_,
-                                                           xx, yy, subtitleWidth_, subtitleHeight_,
-                                                           blendLayer,
-                                                           rt->x * dst_video_width/src_video_width,
-                                                           rt->y * dst_video_height/src_video_height,
-                                                           rect_w, rect_h)) {
+                                                            xx, yy, subtitleWidth_, subtitleHeight_,
+                                                            blendLayer,
+                                                            rt->x * dst_video_width/src_video_width,
+                                                            rt->y * dst_video_height/src_video_height,
+                                                            rect_w, rect_h)) {
                                         mainRect.X = (float) xx;
                                         mainRect.Y = (float) yy;
                                         mainRect.Width  = (float) subtitleWidth_;
@@ -3354,7 +3421,6 @@ bool AVDecoder::AudioAndSubtitleThread_()
                                     SubtitleRect const& rect = subtitleRects_[subtitleRectCount_];
                                     subtitleRectCount_ += ret;
                                     if (1==++rects) {
-                                        //
                                         // we respect to ass timestamp. not sub.
                                         // but the question is, do it need to shift by startTime_?
                                         sub.pts = startTime_ + int64_t(rect.TimeStart)*1000;
@@ -3428,44 +3494,38 @@ bool AVDecoder::AudioAndSubtitleThread_()
                             }
 
                             ++subtitlePut_; // do this last
+#ifdef DEBUG_SUBTITLE_DECODE_BENCHMARK
+                            BL_LOG("** Embedded subtitle #%d (%ssub) finished in %.1fms\n",
+                                   subtitleGet_, (SUBTITLE_BITMAP==type) ? "hard":"soft",
+                                   1000.0*(mlabs::balai::system::GetTime()-t0));
                         }
                         else {
-                            subtitleJobId = subtitlePut_;
+                            BL_LOG("** Embedded subtitle #%d failed(%.1fms)!?\n",
+                                   subtitleGet_, 1000.0*(mlabs::balai::system::GetTime()-t0));
+#endif
                         }
 
                         // free subtitle
                         avsubtitle_free(&sub);
-
-#ifdef DEBUG_SUBTITLE_DECODE_BENCHMARK
-                        if (rects>0) {
-                            BL_LOG("** Subtitle job #%d (%ssub) finished in %.1fms\n",
-                                   subtitleJobId, (SUBTITLE_BITMAP==type) ? "hard":"soft",
-                                   1000.0*(mlabs::balai::system::GetTime()-t0));
-                        }
-                        else {
-                            BL_LOG("** Subtitle job #%d finished in %.1fms but got nothing... redo...\n",
-                                   subtitleJobId, 1000.0*(mlabs::balai::system::GetTime()-t0));
-                        }
-#endif
-                    });
+                    }
                 }
                 else {
                     ReleaseAVPacketList_(pk);
                 }
             }
             else if (first_SRT_streams_index<=subtitleStreamIndex_) {
+                // softsub
                 assert(subtitleStreamIndex_<(first_SRT_streams_index+subtitleUtil_.TotalStreams()));
                 assert(NULL==subtitleCodecCtx);
                 int const subId = subtitleStreamIndex_ - first_SRT_streams_index;
                 int const timestamp = (0<=audioStreamIndex_) ? int((audioGetPTS_-startTime_)/1000):int((videoGetPTS_-startTime_)/1000);
-                subtitleJobId = subtitlePut_ + 1;
-                std::async([this, subId, timestamp, &subtitleJobId] {
+                if (!subtitleUtil_.IsFinish(subId, timestamp)) {
 #ifdef DEBUG_SUBTITLE_DECODE_BENCHMARK
                     double const t0 = mlabs::balai::system::GetTime();
 #endif
                     std::lock_guard<std::mutex> lock(subtitleMutex_);
                     subtitleRectCount_ = subtitleWidth_ = subtitleHeight_ = 0;
-                    int const ret = subtitleUtil_.Dialogue(subId, timestamp,
+                    int const ret = subtitleUtil_.Publish(subId, timestamp,
                                                         subtitleBuffer_, subtitleBufferSize_,
                                                         subtitleWidth_, subtitleHeight_,
                                                         subtitleRects_, Subtitle::MAX_NUM_SUBTITLE_RECTS);
@@ -3487,20 +3547,25 @@ bool AVDecoder::AudioAndSubtitleThread_()
                         ++subtitlePut_; // do this last
 
 #ifdef DEBUG_SUBTITLE_DECODE_BENCHMARK
-                        BL_LOG("** Subtitle job #%d (softsub) finished in %.1fms\n",
-                               subtitleJobId, 1000.0*(mlabs::balai::system::GetTime()-t0));
+                        BL_LOG("** External subtitle #%d finished in %.1fms\n",
+                               subtitleGet_, 1000.0*(mlabs::balai::system::GetTime()-t0));
 #endif
                     }
                     else {
-                        subtitleJobId = subtitlePut_; // failed!
+                        BL_LOG("external subtitle get nothing!\n"); // error
                     }
-                });
+                }
             }
         }
 
         // take a short nap if we're good.
-        if (take_nap) {
-            av_usleep(2000);
+        if (0==timeInterruptSysTime_) {
+            if (!audio_on || audioBufferPut_>(audioBufferGet_+(audioBufferWrapSize_*8/10))) {
+                if (subtitleStreamIndex_<0 || subtitleGet_<subtitlePut_ ||
+                    (subtitleStreamIndex_<first_SRT_streams_index && 0==subtitleQueue_.Size())) {
+                    av_usleep(2000);
+                }
+            }
         }
 
 #ifdef DEBUG_AUDIO_DECODE_BENCHMARK
@@ -3530,7 +3595,6 @@ bool AVDecoder::AudioAndSubtitleThread_()
     // lock to ensure Subtitle job is done
     {
         std::lock_guard<std::mutex> lock(subtitleMutex_);
-        assert(subtitleJobId<=subtitlePut_);
         if (NULL!=subtitleCodecCtx) {
             avcodec_close(subtitleCodecCtx);
             avcodec_free_context(&subtitleCodecCtx);
@@ -4373,9 +4437,9 @@ bool AVDecoder::UpdateFrame()
             }
 
             if (STATUS_PLAYING==status_ && timeInterruptSysTime_>0 && NULL!=host_) {
-                //assert(cur_time>=timeInterruptSysTime_); // precision problem!?
+                assert(0==interruptRequest_);
                 int const lag_time = int((cur_time-timeInterruptSysTime_)/1000);
-                if ((0==audioQueue_.Size() && 0==videoQueue_.Size()) || lag_time>1000) {
+                if (0==audioQueue_.Size() || 0==videoQueue_.Size() || lag_time>0) {
                     host_->OnDataLag(id_, lag_time);
                 }
             }
@@ -4546,6 +4610,12 @@ bool AVDecoder::Play()
 //---------------------------------------------------------------------------------------
 bool AVDecoder::PlayAt(int time)
 {
+    /////////////////////////////////////////////////////////////////////////////////////
+#ifdef TEST_AMF_FAIL_CASE
+    time = debug_AMF_my_brothers_keeper_time_at;
+#endif
+    /////////////////////////////////////////////////////////////////////////////////////
+
     std::lock_guard<std::mutex> lock(asyncPlayMutex_);
     if (NULL!=formatCtx_ && 0<=time &&
         (STATUS_READY==status_ || STATUS_PLAYING==status_ || STATUS_STOP==status_ ||

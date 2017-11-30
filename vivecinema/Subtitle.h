@@ -87,7 +87,7 @@ private:
                             v = a.Value;
                         }
                         else {
-                            float alpha = float(t- time)/float(a.Time-time);
+                            float alpha = float(t-time)/float(a.Time-time);
                             if (a.Accl!=1.0f) {
                                 alpha = pow(alpha, a.Accl);
                             }
@@ -461,14 +461,13 @@ private:
         int     StyleLength; // ASS style lendth
         int     TimeStart;
         int     TimeEnd;
-        int     LastPublishStart;
-        int     LastPublishEnd;
+        int     NextDialogueId;
 
         SubStream():Dialogues(),Buffer(NULL),Format(FORMAT_UNKNOWN),
             Language(ISO_639_UNKNOWN),Codepage(0),BufferSize(0),
             StyleLength(0),
             TimeStart(0),TimeEnd(0),
-            LastPublishStart(0),LastPublishEnd(0) {
+            NextDialogueId(0) {
             memset(Filename, 0, sizeof(Filename));
         }
 
@@ -482,8 +481,7 @@ private:
             Format = FORMAT_UNKNOWN;
             Language = ISO_639_UNKNOWN;
             Codepage = 0; 
-            BufferSize = StyleLength = TimeStart = TimeEnd = 0;
-            LastPublishStart = LastPublishEnd = 0;
+            BufferSize = StyleLength = TimeStart = TimeEnd = NextDialogueId = 0;
         }
     };
 
@@ -675,8 +673,7 @@ public:
     void ClearCache() {
         std::lock_guard<std::mutex> lock(mutex_);
         for (int i=0; i<totalExtSubtitleStreams_; ++i) {
-            SubStream& sub = extSubtitleStreams_[i];
-            sub.LastPublishEnd = sub.LastPublishStart = 0;
+            extSubtitleStreams_[i].NextDialogueId = 0;
         }
     }
 
@@ -694,10 +691,10 @@ public:
     }
 
     bool OnChangeExternalSubtitle(int subtitle_id) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (subtitle_id<totalExtSubtitleStreams_) {
+        if (0<=subtitle_id && subtitle_id<totalExtSubtitleStreams_) {
+            std::lock_guard<std::mutex> lock(mutex_);
             SubStream& sub = extSubtitleStreams_[subtitle_id];
-            sub.LastPublishStart = sub.LastPublishEnd = 0;
+            sub.NextDialogueId = 0;
             if (sub.Format==FORMAT_ASS) {
                 collisions_ = COLLISION_DEFAULT;
                 wrapMode_ = 0;
@@ -775,9 +772,12 @@ public:
     }
 
     // external subtitle
-    int Dialogue(int subtitleId, int timestamp,
-                 uint8* buffer, int buffer_size, int& width, int& height,
-                 SubtitleRect* rects, int max_rects);
+    bool IsFinish(int subtitleId, int timestamp);
+
+    // return # of rects
+    int Publish(int subtitleId, int timestamp,
+                uint8* buffer, int buffer_size, int& width, int& height,
+                SubtitleRect* rects, int max_rects);
 
     // UGLY band aid! C++ experts, close your eyes please~~
     void* CookExtSubtitleNameTexture(int& width, int& height,

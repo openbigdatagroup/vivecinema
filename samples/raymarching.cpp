@@ -26,7 +26,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 #include "SFG/SFGVoxelViewer.h"
 #include "BLApplication.h"
 #include "BLCStdMemory.h"
@@ -231,8 +230,10 @@ public:
 
         // move
         if (0.0f!=dx || 0.0f!=dy || 0.0f!=dz) {
-            //camera_.LineOfSight();
-            camera_.Move(-4.0f*dx, 5.0f*dy, 4.0f*dz);
+            float dist = camera_.GetTransform().Origin().Norm();
+            if (dist<1.0f)
+                dist = 1.0f;
+            camera_.Move(-dx*dist, dy*dist, dz*dist*height_/width_);
         }
     }
 

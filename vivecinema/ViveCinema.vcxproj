@@ -66,25 +66,25 @@
     <_ProjectFileVersion>11.0.61030.0</_ProjectFileVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <OutDir>$(SolutionDir)bin\win32\</OutDir>
-    <IntDir>$(SolutionDir)bin\intermdeiate\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <OutDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
     <TargetName>$(ProjectName)</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)bin\</OutDir>
-    <IntDir>$(SolutionDir)bin\intermdeiate\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <OutDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <TargetName>$(ProjectName)</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>$(SolutionDir)bin\win32\</OutDir>
-    <IntDir>$(SolutionDir)bin\intermdeiate\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <OutDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(SolutionDir)bin\</OutDir>
-    <IntDir>$(SolutionDir)bin\intermdeiate\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <OutDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -115,7 +115,8 @@
       <Command>copy "$(ProjectDir)..\third_party\FFmpeg\lib\win32\*.dll" "$(OutDir)\*.dll"
 copy "$(ProjectDir)..\third_party\glew\bin\Release\Win32\glew32.dll" "$(OutDir)\glew32.dll"
 copy "$(ProjectDir)..\third_party\openvr\bin\win32\openvr_api.dll" "$(OutDir)\openvr_api.dll"
-copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
+copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"
+copy "$(TargetPath)" ".\bin\win32\$(TargetName)_vs2012_debug$(TargetExt)"</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>copying DLLs</Message>
@@ -148,7 +149,8 @@ copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"</C
       <Command>copy "$(ProjectDir)..\third_party\FFmpeg\lib\x64\*.dll" "$(OutDir)\*.dll"
 copy "$(ProjectDir)..\third_party\glew\bin\Release\x64\glew32.dll" "$(OutDir)\glew32.dll"
 copy "$(ProjectDir)..\third_party\openvr\bin\win64\openvr_api.dll" "$(OutDir)\openvr_api.dll"
-copy "$(ProjectDir)..\third_party\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
+copy "$(ProjectDir)..\third_party\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"
+copy "$(TargetPath)" ".\bin\$(TargetName)_vs2012_debug$(TargetExt)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -180,7 +182,8 @@ copy "$(ProjectDir)..\third_party\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"</C
       <Command>copy "$(ProjectDir)..\third_party\FFmpeg\lib\win32\*.dll" "$(OutDir)\*.dll"
 copy "$(ProjectDir)..\third_party\glew\bin\Release\Win32\glew32.dll" "$(OutDir)\glew32.dll"
 copy "$(ProjectDir)..\third_party\openvr\bin\win32\openvr_api.dll" "$(OutDir)\openvr_api.dll"
-copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
+copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"
+copy "$(TargetPath)" ".\bin\win32\$(TargetName)$(TargetExt)"</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>copying DLLs</Message>
@@ -215,7 +218,8 @@ copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"</C
       <Command>copy "$(ProjectDir)..\third_party\FFmpeg\lib\x64\*.dll" "$(OutDir)\*.dll"
 copy "$(ProjectDir)..\third_party\glew\bin\Release\x64\glew32.dll" "$(OutDir)\glew32.dll"
 copy "$(ProjectDir)..\third_party\openvr\bin\win64\openvr_api.dll" "$(OutDir)\openvr_api.dll"
-copy "$(ProjectDir)..\third_party\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
+copy "$(ProjectDir)..\third_party\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"
+copy "$(TargetPath)" ".\bin\$(TargetName)$(TargetExt)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>

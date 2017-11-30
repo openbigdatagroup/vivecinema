@@ -239,7 +239,6 @@ class AudioManager
     int    bufferSize_;
 
     bool pause_;
-    bool debug_toggle_;
 
     // prepare...
     void Prepare_() {
@@ -302,8 +301,7 @@ protected:
         foa_SH_HRTF_(),soa_SH_HRTF_(),toa_SH_HRTF_(),itu_7_1_HRTF_(),
         shRotate_(),
         buffer_(NULL),bufferSize_(0),
-        pause_(true),
-        debug_toggle_(false) {
+        pause_(true) {
         bufferSize_ = 2048*(16+2)*sizeof(float);
         buffer_ = (float*) malloc(bufferSize_);
         if (NULL==buffer_) {
@@ -324,14 +322,6 @@ public:
     }
   //  int  BatchSize() const { return batchSize_; } // 0 if unknown
     bool IsPause() const { return pause_; }
-
-    ///////////////////////////////////////////////////////////////////////////////////
-    // to be removed
-    void DebugToggle() {
-        debug_toggle_ = !debug_toggle_;
-        BL_LOG("AudioManager::DebugToggle() %s\n", debug_toggle_? "On":"Off");
-    }
-    ////////////////////////////////////////////////////////////////////////////////////
 
     /////////////////////////////////////////////////////////////////////////////////////
     bool LoadDecoders(char const* decoderlib);

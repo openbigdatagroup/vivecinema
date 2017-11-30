@@ -652,7 +652,6 @@ bool AudioManager::DecodeAmbisonicHRTF_(void* output, AUDIO_FORMAT fmt,
     }
 
     return true;
-    //return !debug_toggle_;
 }
 
 //
@@ -978,7 +977,6 @@ inline bool proj_3rd_ambix(float* dst, int samples, float const* src, uint8 cons
                  src[Q]*sQR + src[O]*sOR + src[M]*sMR + src[K]*sKR + src[L]*sLR + src[N]*sNR + src[P]*sPR;
     }
 #ifdef TIME_METERING
-    //Sleep(5);
     double const t1 = mlabs::balai::system::GetTime();
     time += (t1-t0);
     total_samples += samples;

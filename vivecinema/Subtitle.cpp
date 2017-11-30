@@ -643,6 +643,7 @@ bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
         }
 
         // format and dialog. s now pointer to next line of [Events]
+        char const* format = NULL;
         uint32 dialogue_fields[MAX_ASS_DIALOGUE_FIELDS];
         int total_dialogue_fields = 0;
         while (NULL==format && s<end) {
@@ -652,6 +653,7 @@ bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
             }
 
             if (0==memcmp(s, "Format:", 7)) {
+                format = s;
                 sub.StyleLength = (int) ((uint8 const*)e - sub.Buffer);
                 s += 7;
                 while (s<e) {
@@ -998,13 +1000,13 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
         if (2==utf_chars) {
             sub.BufferSize = sub.BufferSize & ~1;
             if (big_endian) {
-                uint8* p = sub.Buffer;
+                uint8* ptr = sub.Buffer;
                 uint8 t;
                 for (int i=0; i<sub.BufferSize; i+=2) {
-                    t = p[0];
-                    p[0] = p[1];
-                    p[1] = t;
-                    p += 2;
+                    t = ptr[0];
+                    ptr[0] = ptr[1];
+                    ptr[1] = t;
+                    ptr += 2;
                 }
             }
 
@@ -1035,7 +1037,7 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
             // translate to utf8, or failed.
             uint8* utf8 = NULL;
             int    utf8_len = 0;
-            uint8 const* ptr1 = sub.Buffer;
+            uint8 const* ptr = sub.Buffer;
             uint8 const* const ptr_end = sub.Buffer + sub.BufferSize;
             if (big_endian) {
                 struct UTF32BE {
@@ -1043,15 +1045,15 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
                         return (uint32(ptr[0])<<24) | (uint32(ptr[1])<<16) | (uint32(ptr[2])<<8) | uint32(ptr[3]);
                     }
                 };
-                int const len = GetUTF32toUTF8Size<UTF32BE>(ptr1, ptr_end);
-                if (len>0 && ptr1==ptr_end) {
-                    utf8 = (uint8*) malloc(len+1);
+                int const len = GetUTF32toUTF8Size<UTF32BE>(ptr, ptr_end);
+                if (len>0 && ptr==ptr_end) {
+                    uint8* utf8 = (uint8*) malloc(len+1);
                     if (NULL!=utf8) {
-                        ptr1 = sub.Buffer;
+                        ptr = sub.Buffer;
                         uint8* dst = utf8;
                         uint8* const dst_end = dst + len;
-                        int const len2 = ConvertUTF32toUTF8<UTF32BE>(dst, dst_end, ptr1, ptr_end);
-                        if (len2==len && dst==dst_end && ptr1==ptr_end) {
+                        int const len2 = ConvertUTF32toUTF8<UTF32BE>(dst, dst_end, ptr, ptr_end);
+                        if (len2==len && dst==dst_end && ptr==ptr_end) {
                             utf8[len] = '\0';
                             utf8_len = len;
                         }
@@ -1068,15 +1070,15 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
                         return (uint32(ptr[3])<<24) | (uint32(ptr[2])<<16) | (uint32(ptr[1])<<8) | uint32(ptr[0]);
                     }
                 };
-                int const len = GetUTF32toUTF8Size<UTF32LE>(ptr1, ptr_end);
-                if (len>0 && ptr1==ptr_end) {
-                    utf8 = (uint8*) malloc(len+1);
+                int const len = GetUTF32toUTF8Size<UTF32LE>(ptr, ptr_end);
+                if (len>0 && ptr==ptr_end) {
+                    uint8* utf8 = (uint8*) malloc(len+1);
                     if (NULL!=utf8) {
-                        ptr1 = sub.Buffer;
+                        ptr = sub.Buffer;
                         uint8* dst = utf8;
                         uint8* const dst_end = dst + len;
-                        int const len2 = ConvertUTF32toUTF8<UTF32LE>(dst, dst_end, ptr1, ptr_end);
-                        if (len2==len && dst==dst_end && ptr1==ptr_end) {
+                        int const len2 = ConvertUTF32toUTF8<UTF32LE>(dst, dst_end, ptr, ptr_end);
+                        if (len2==len && dst==dst_end && ptr==ptr_end) {
                             utf8[len] = '\0';
                             utf8_len = len;
                         }
@@ -1231,7 +1233,7 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
                     MAPPING_PROPERTY_BAG bag;
                     memset(&bag, 0 , sizeof(bag));
                     bag.Size = sizeof(bag);
-                    hr = MappingRecognizeText(pService, wtext, len, 0, nullptr, &bag);
+                    HRESULT hr = MappingRecognizeText(pService, wtext, len, 0, nullptr, &bag);
                     if (SUCCEEDED(hr) && bag.prgResultRanges && bag.prgResultRanges[0].pData) {
                         //BL_LOG("Service: %ws, category: %ws\n", pService[0].pszDescription, pService[0].pszCategory);
                         // Service: Microsoft Language Detection, category: Language Detection
@@ -1835,10 +1837,10 @@ int Subtitle::SRT_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
             if ((movieResX_*9)>(movieResY_*16))
                 display_height = display_height*(movieResX_*9)/(movieResY_*16);
 
-            char const* s1 = pg->text;
+            char const* s = pg->text;
             char const* const text_end = pg->text + pg->length;
-            while (s1<text_end && num_rects<max_rects) {
-                if (*s1=='\n') {
+            while (s<text_end && num_rects<max_rects) {
+                if (*s=='\n') {
                     display_left = 0;
                     if (display_height_max>0) {
                         display_top += display_height_max;
@@ -1847,13 +1849,13 @@ int Subtitle::SRT_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
                     else {
                         display_top += display_height;
                     }
-                    ++s1;
+                    ++s;
                     continue;
                 }
 
-                char const* e = s1;
+                char const* e = s;
                 while (e<text_end && *e!='\n') ++e;
-                wchar_t const* const wptr_end = wptr + MultiByteToWideChar(CP_UTF8, 0, s1, (int) (e-s1), wptr, (int)(wtext_buffer_end-wptr));
+                wchar_t const* const wptr_end = wptr + MultiByteToWideChar(CP_UTF8, 0, s, (int) (e-s), wptr, (int)(wtext_buffer_end-wptr));
                 if (wptr<wptr_end) {
                     int length(0), linebreaks(0);
                     while (wptr<wptr_end && num_rects<max_rects &&
@@ -1921,7 +1923,7 @@ int Subtitle::SRT_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
                     display_height_max = 0;
                 }
 
-                s1 = e + 1;
+                s = e + 1;
             }
         }
 
@@ -3825,16 +3827,16 @@ int Subtitle::Create(char const* videofile)
             if (0==(FILE_ATTRIBUTE_DIRECTORY&fd.dwFileAttributes)) {
                 int short_len = (int) wcslen(fd.cFileName);
                 if (short_len>4) {
-                    wchar_t const* wext = fd.cFileName + short_len - 4;
-                    if (*wext==L'.') {
-                        ++wext;
+                    wchar_t const* ext = fd.cFileName + short_len - 4;
+                    if (*ext==L'.') {
+                        ++ext;
                         int const loading_subtitle = totalExtSubtitleStreams_;
                         SubStream& sub = extSubtitleStreams_[loading_subtitle];
-                        if (0==memcmp(wext, L"srt", 3*sizeof(wchar_t)) || 0==memcmp(wext, L"SRT", 3*sizeof(wchar_t))) {
+                        if (0==memcmp(ext, L"srt", 3*sizeof(wchar_t)) || 0==memcmp(ext, L"SRT", 3*sizeof(wchar_t))) {
                             len = swprintf(wfilename, MAX_PATH, L"%s/%s", wfullpath, fd.cFileName);
                             AddSubtitleStream_(wfilename, FORMAT_SRT);
                         }
-                        else if (0==memcmp(wext, L"ass", 3*sizeof(wchar_t)) || 0==memcmp(wext, L"ASS", 3*sizeof(wchar_t))) {
+                        else if (0==memcmp(ext, L"ass", 3*sizeof(wchar_t)) || 0==memcmp(ext, L"ASS", 3*sizeof(wchar_t))) {
                             len = swprintf(wfilename, MAX_PATH, L"%s/%s", wfullpath, fd.cFileName);
                             AddSubtitleStream_(wfilename, FORMAT_ASS);
                         }
@@ -4268,15 +4270,22 @@ int Subtitle::Dialogue_ASS(uint8* buffer, int buffer_size, int& width, int& heig
                               &dialogue, 1, 0, CP_UTF8);
 }
 //---------------------------------------------------------------------------------------
-int Subtitle::Dialogue(int subtitleId, int timestamp,
-                       uint8* buffer, int buffer_size, int& width, int& height,
-                       SubtitleRect* rects, int max_rects)
+bool Subtitle::IsFinish(int subtitleId, int timestamp)
+{
+    if (subtitleId<MAX_EXTERNAL_SUBTITLE_STREAMS) {
+        SubStream& sub = extSubtitleStreams_[subtitleId];
+        return sub.NextDialogueId>=(int)sub.Dialogues.size() || timestamp>=sub.TimeEnd;
+    }
+    return true;
+}
+int Subtitle::Publish(int subtitleId, int timestamp,
+                      uint8* buffer, int buffer_size, int& width, int& height,
+                      SubtitleRect* rects, int max_rects)
 {
     assert(NULL!=buffer && NULL!=rects && max_rects>0 && subtitleId<MAX_EXTERNAL_SUBTITLE_STREAMS);
     std::lock_guard<std::mutex> lock(mutex_);
     if (subtitleId!=currentExtSubtitleStreamId_ || subtitleId>=MAX_EXTERNAL_SUBTITLE_STREAMS ||
         NULL==buffer || buffer_size<=0 || NULL==rects || max_rects<=0) {
-        Sleep(5);
         return 0;
     }
 
@@ -4284,84 +4293,33 @@ int Subtitle::Dialogue(int subtitleId, int timestamp,
     SubStream& sub = extSubtitleStreams_[subtitleId];
     mlabs::balai::Array<SubStream::Dialogue> const& dialogues = sub.Dialogues;
     int const total_dialogues = dialogues.size();
-    if (total_dialogues<1 || timestamp>=sub.TimeEnd) {
-        Sleep(50);
+    if (timestamp>=sub.TimeEnd || sub.NextDialogueId>=total_dialogues) {
         return 0;
     }
 
-    // find the range we will like to publish
-    int subtitle_begin(-1), subtitle_end(-1);
-    assert(0<=sub.LastPublishStart);
-    if (0<=sub.LastPublishStart && sub.LastPublishStart<sub.LastPublishEnd) {
-        // continue publishing
-        if (sub.LastPublishEnd<total_dialogues) {
-            // if user change timestamp, invalid cache.
-            if ((timestamp+1000)<dialogues[sub.LastPublishStart].TimeStart ||
-                (dialogues[sub.LastPublishEnd].TimeEnd+1000)<timestamp) {
-#ifdef BL_DEBUG_BUILD
-                BL_LOG("Subtitle::Dialogue() : invalid publish cache [start:%d, end:%d) time:%d %d %d\n",
-                                    sub.LastPublishStart, sub.LastPublishEnd,
-                                    timestamp,
-                                    dialogues[sub.LastPublishStart].TimeStart,
-                                    dialogues[sub.LastPublishEnd].TimeEnd);
-#endif
-                sub.LastPublishStart = sub.LastPublishEnd = 0;
-                return 0; // it restarts shortly!
+    // find the range we'd like to publish
+    int subtitle_begin(0), subtitle_end(0);
+    for (int i=sub.NextDialogueId; i<total_dialogues; ++i) {
+        SubStream::Dialogue const& s = dialogues[i];
+        if ((timestamp+500)<s.TimeEnd) {
+            subtitle_begin = i;
+            subtitle_end = subtitle_begin + 1;
+            while (subtitle_end<total_dialogues && s.TimeEnd>dialogues[subtitle_end].TimeStart) {
+                ++subtitle_end;
             }
-
-            // target timestamp is the start time of the next dialogue
-            timestamp = dialogues[sub.LastPublishEnd].TimeStart;
-
-            for (int i=sub.LastPublishStart; i<total_dialogues; ++i) {
-                SubStream::Dialogue const& d = dialogues[i];
-                if (subtitle_begin<0) {
-                    if (timestamp<=d.TimeStart || ((timestamp+1000)<d.TimeEnd)) {
-                        subtitle_begin = i;
-                        subtitle_end = i + 1;
-                    }
-                }
-                else {
-                    subtitle_end = i + 1;
-                    if ((timestamp+1000)<d.TimeStart) {
-                        subtitle_end = i;
-                        break;
-                    }
-                }
-            }
+            break;
         }
         else {
-            // all dialogues have been published. really!?
-            assert(total_dialogues==sub.LastPublishEnd);
-            Sleep(50);
-            return 0;
-        }
-    }
-    else {
-        for (int i=0; i<total_dialogues; ++i) {
-            SubStream::Dialogue const& d = dialogues[i];
-            if (subtitle_begin<0) {
-                if (timestamp<d.TimeStart || ((timestamp+1000)<d.TimeEnd)) {
-                    timestamp = d.TimeStart;
-                    subtitle_begin = i;
-                    subtitle_end = i + 1;
-                }
-            }
-            else {
-                subtitle_end = i + 1;
-                if ((timestamp+1000)<d.TimeStart) {
-                    subtitle_end = i;
-                    break;
-                }
-            }
+            subtitle_begin = subtitle_end = i + 1;
         }
     }
 
     // publish
+    int num_rects = 0;
     if (0<=subtitle_begin && subtitle_begin<subtitle_end) {
-        int total_rects = 0;
         SubStream::Dialogue const* start = dialogues.at(subtitle_begin);
         if (sub.Format==FORMAT_ASS) {
-            total_rects = ASS_Dialogue_Text_(buffer, buffer_size, width, height, rects, max_rects,
+            num_rects = ASS_Dialogue_Text_(buffer, buffer_size, width, height, rects, max_rects,
                                        start, (subtitle_end-subtitle_begin),
                                        timestamp, sub.Codepage);
         }
@@ -4370,49 +4328,16 @@ int Subtitle::Dialogue(int subtitleId, int timestamp,
             if (subtitle_end>subtitle_begin+limit) {
                 subtitle_end = subtitle_begin + limit;
             }
-            total_rects = SRT_Dialogue_Text_(buffer, buffer_size, width, height, rects, max_rects,
+            num_rects = SRT_Dialogue_Text_(buffer, buffer_size, width, height, rects, max_rects,
                                        start, subtitle_end-subtitle_begin,
                                        timestamp, sub.Codepage);
         }
-
-        if (total_rects>0) {
-#if 0
-            wchar_t wtext[1024];
-            for (int i=subtitle_begin; i<subtitle_end; ++i) {
-                SubStream::Dialogue const& d = dialogues[i];
-                int ds1 = (d.TimeStart%1000);
-                int s1 = d.TimeStart/1000;
-                int h1 = s1/3600; s1%=3600;
-                int m1 = s1/60; s1%=60;
-
-                int ds2 = (d.TimeEnd%1000);
-                int s2 = d.TimeEnd/1000;
-                int h2 = s2/3600; s2%=3600;
-                int m2 = s2/60; s2%=60;
-                
-                int len = MultiByteToWideChar(sub.Codepage, 0, d.TextStart, (int) (d.TextEnd-d.TextStart), wtext, 1024);
-                wtext[len] = 0;
-
-                BL_LOG("subtitle#%d (publish:%+dms) [%02d:%02d:%02d,%03d, %02d:%02d:%02d,%03d]: ",
-                        i+1, current_timestamp-d.TimeStart, h1, m1, s1, ds1, h2, m2, s2, ds2);
-                OutputDebugStringW(wtext);
-                BL_LOG("\n");
-            }
-#endif
-        }
-
-        sub.LastPublishStart = subtitle_begin;
-        sub.LastPublishEnd = subtitle_end;
-
-        return total_rects;
-    }
-    else {
-        // nothing to publish, take a nap!
-        sub.LastPublishStart = sub.LastPublishEnd = 0;
-        Sleep(50);
     }
 
-    return 0;
+    if (sub.NextDialogueId<subtitle_end)
+        sub.NextDialogueId = subtitle_end;
+
+    return num_rects;
 }
 
 }}}

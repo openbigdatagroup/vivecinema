@@ -1087,7 +1087,7 @@ class VRVideoPlayer : public IAVDecoderHost
         {
         case mlabs::balai::VR::VR_INTERRUPT_PAUSE:
             if (NULL!=current_track_) { // playing mode
-                std::async([this] { decoder_.Stop(); });
+                std::async(std::launch::async, [this] { decoder_.Stop(); });
                 if (widget_on_<2) {
                     widget_on_ = 2;
                     widget_timer_ = (float) mlabs::balai::system::GetTime();
@@ -1106,7 +1106,7 @@ class VRVideoPlayer : public IAVDecoderHost
             // #21
             if (NULL!=current_track_ && 0==(0x1000&on_processing_)) {
                 if (!decoder_.IsPlaying()) { // not necessary!?
-                    std::async([this] { decoder_.Play(); });
+                    std::async(std::launch::async, [this] { decoder_.Play(); });
                 }
             }
             break;
@@ -1281,12 +1281,11 @@ public:
     }
 
 #ifndef HTC_VIVEPORT_RELEASE
-    void ToggleAudioManagerDebug() { audioManager_.DebugToggle(); }
     void ToggleAudioChange() {
         static int audio_index = 3;
         if (total_audio_streams_>1 && NULL!=current_track_) {
 #if 1
-            int aid = (audio_index+rand()+1)%total_audio_streams_;
+            int aid = (audio_index+1)%total_audio_streams_;
             audio_index = (audio_index!=aid) ? aid:((aid+1)%total_audio_streams_);
             aid = lanStmIDs_[audio_index];
             current_track_->SetAudioStreamID(aid);
@@ -1303,7 +1302,7 @@ public:
     void ToggleSubtitleChange() {
         static int subtitle_index = 0;
         if (total_subtitle_streams_>1 && NULL!=current_track_) {
-            int sid = (subtitle_index+rand()+1)%total_subtitle_streams_;
+            int sid = (subtitle_index+1)%total_subtitle_streams_;
             subtitle_index = (sid!=subtitle_index) ? sid:((sid+1)%total_subtitle_streams_);
             sid = subStmIDs_[subtitle_index];
             current_track_->SetSubtitleStreamID(sid);
@@ -1469,7 +1468,7 @@ public:
                 on_processing_ = 0x1006; // trying to play
                 on_processing_time_start_ = (float) mlabs::balai::system::GetTime();
                 decoder_.Stop();
-                std::async([this] {
+                std::async(std::launch::async, [this] {
                     decoder_.Play();
                     if (0x1006==on_processing_) {
                         on_processing_ = 0;
@@ -1482,7 +1481,7 @@ public:
 
             int const total_tracks = playList_.size();
             if (1==loop_mode_ || (0!=loop_mode_&&total_tracks<=1) ) {
-                std::async([this] {
+                std::async(std::launch::async, [this] {
                     // sleep 3 secs, C++11
                     std::this_thread::sleep_for(std::chrono::seconds(3));
                     decoder_.PlayAt(0);
@@ -1507,7 +1506,7 @@ public:
             on_processing_ = 0x1005; // trying to play
             on_processing_time_start_ = (float) mlabs::balai::system::GetTime();
             decoder_.Stop();
-            std::async([this] {
+            std::async(std::launch::async, [this] {
                 decoder_.Play();
                 if (0x1005==on_processing_) {
                     on_processing_ = 0;

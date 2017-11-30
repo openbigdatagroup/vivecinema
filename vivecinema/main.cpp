@@ -93,9 +93,10 @@ namespace mlabs { namespace balai { namespace framework {
  *   2017.09.25 ver 0.9.559 - a build for Kaohsiung Film Festival
  *   2017.09.27 ver 0.9.561 - loop(repeat) version (for Golden Bell Awards event)
  *   2017.09.28 ver 0.9.562 - final RC. ready to open source. waiting for final video from VRC Jack.
- *   2017.09.29 ver 0.9.563 - GPL3 license
+ *   2017.09.29 ver 0.9.563 - GPL3 license, open source https://github.com/openbigdatagroup/vivecinema
+ *   2017.11.30 ver 0.9.624 - fix subtitle sleep, remove async, the last viveport submit.
  */
-char const* const buildNo = "Vive Cinema Build 0.9.563";
+char const* const buildNo = "Vive Cinema Build 0.9.624";
 
 #define DRAW_SINGLE_VIEW
 #ifdef DRAW_SINGLE_VIEW
@@ -234,18 +235,13 @@ public:
         font_(NULL),
         surfaceL_(NULL),surfaceR_(NULL),
         multisampleSamples_(8),msaa_enable_(0),
-#ifdef BL_DEBUG_BUILD
         display_info_(1),
-#else
-        display_info_(0),
-#endif
         perf_HUD_pause_(0) {
 
         //
         // 2016.05.18
         // the current directory is viveport launcher's directory. change it!!!
-//#ifdef HTC_VIVEPORT_RELEASE
-#if 0
+#ifdef HTC_VIVEPORT_RELEASE
         TCHAR module_path[512];
         int len = GetModuleFileNameW(NULL, module_path, 512);
         if (len>0) {
@@ -516,20 +512,20 @@ public:
 #ifdef OPTIMIZING_SHOW_FRAME_TIMIING
     bool Render_FrameTiming() {
         memset(baseline, 0, sizeof(baseline));
-        double time0 = 0.0;
+        double t0 = 0.0;
 
-        time0 = system::GetTime();
+        t0 = system::GetTime();
         vrMgr_.Present(VR::HMD_EYE_LEFT, surfaceL_);
         vrMgr_.Present(VR::HMD_EYE_RIGHT, surfaceR_);
-        vrpresent[cur_log_frame] = (system::GetTime() - time0);
+        vrpresent[cur_log_frame] = (system::GetTime() - t0);
 
-        time0 = system::GetTime();
+        t0 = system::GetTime();
         player_.FrameMove();
-        pbo_update[cur_log_frame] = (system::GetTime() - time0);
+        pbo_update[cur_log_frame] = (system::GetTime() - t0);
 
-        time0 = system::GetTime();
+        t0 = system::GetTime();
         vrMgr_.UpdatePoses();
-        vrpose_update[cur_log_frame] = (system::GetTime() - time0);
+        vrpose_update[cur_log_frame] = (system::GetTime() - t0);
 
         uint64 frameIdUpdatePose = 0;
         timevsync_vrpose[cur_log_frame] = vrMgr_.GetTimeSinceLastVsync(frameIdUpdatePose) - 0.01111f;
@@ -559,9 +555,9 @@ public:
         renderer.SetSurface(NULL);
 
         // 2) draw next frames to be presented in the next loop
-        time0 = system::GetTime();
+        t0 = system::GetTime();
         bool const ret = DrawScene(VR::HMD_EYE_LEFT) && DrawScene(VR::HMD_EYE_RIGHT);
-        drawcall_submit[cur_log_frame] = (system::GetTime() - time0);
+        drawcall_submit[cur_log_frame] = (system::GetTime() - t0);
 /*
         // bad performance for Radeon R9 390, if present here...
         t0 = system::GetTime();
@@ -698,7 +694,7 @@ public:
                 int const font_size = 16;
                 Color const font_color = Color::White;
                 char msg[160];
-                y = 0.01f;
+                float y = 0.01f;
                 font_->DrawText(0.99f, y, font_size, Color::Yellow, "[Toggle Display:D]", FONT_ALIGN_RIGHT);
                 std::sprintf(msg, "FPS : %d", int(GetFPS()+0.5f));
                 float const dy = font_->DrawText(0.01f, y, 15, font_color, msg);
@@ -962,7 +958,7 @@ public:
             Color const viveClr = { 46, 161, 193, 255 };
             player_.DrawVideoPathOnScreen(0.005f, 0.005f, 36.0f/renderer.GetFramebufferHeight(),
                                           renderer.GetFramebufferAspectRatio(), viveClr, 0);
-            float const show_info_y0 = 0.045f;
+            float const show_info_y0 = 0.0525f;
             if (font_) {
                 Color const color = { 128, 128, 128, 192 };
                 int const font_size = 16;
@@ -1064,7 +1060,7 @@ public:
                             font_->DrawText(buffer_pos, y, font_size, font_color, msg);
                         }
 
-                        int duration = player_.Duration();
+                        int const duration = player_.Duration();
                         if (duration>0) {
                             ms = duration%1000;
                             s  = duration/1000;
@@ -1134,9 +1130,8 @@ public:
                             std::sprintf(msg, "Audio : %02d:%02d:%02d:%02d", h, m, s, ms/10);
                             y+=font_->DrawText(0.01f, y, font_size, font_color, msg);
 
-                            int extStreamId(0), start(0);
+                            int extStreamId(0), start(0), duration(0);
                             bool hardsub = false;
-                            duration = 0;
                             int const streamId = player_.SubtitleBuffering(extStreamId, hardsub, start, duration);
                             if (streamId>=0) {
                                 if (duration>0) {
@@ -1209,13 +1204,13 @@ public:
                     prim.BeginDraw(NULL, GFXPT_LINELIST);
                     prim.SetColor(Color::Red);
                     prim.AddVertex(origin);
-                    prim.AddVertex(origin + xAxis);
+                    prim.AddVertex(origin + 0.75f*xAxis);
                     prim.SetColor(Color::Green);
                     prim.AddVertex(origin);
-                    prim.AddVertex(origin + yAxis);
+                    prim.AddVertex(origin + 0.75f*yAxis);
                     prim.SetColor(Color::Blue);
                     prim.AddVertex(origin);
-                    prim.AddVertex(origin + zAxis);
+                    prim.AddVertex(origin + 0.75f*zAxis);
                     prim.EndDraw();
 
                     renderer.SetBlendMode(GFXBLEND_SRCALPHA, GFXBLEND_INVSRCALPHA);
@@ -1223,8 +1218,8 @@ public:
                         Color const front_color = { 255, 255, 255, 192 };
                         Color const back_color = { 128, 128, 128, 192 };
                         prim.SetColor(front_color);
-                        Vector3 const v1 = 0.75f*(xAxis + yAxis);
-                        Vector3 const v2 = 0.75f*(xAxis - yAxis);
+                        Vector3 const v1 = 0.66f*(xAxis + yAxis);
+                        Vector3 const v2 = 0.66f*(xAxis - yAxis);
                         prim.AddVertex(origin - v2);
                         prim.AddVertex(origin - v1);
                         prim.AddVertex(origin + v2);
@@ -1415,11 +1410,6 @@ public:
             case SDLK_F11:
                 if (0==key.repeat)
                     player_.ToggleSubtitleChange();
-                break;
-
-            case SDLK_F12:
-                if (0==key.repeat)
-                    player_.ToggleAudioManagerDebug();
                 break;
 #endif
             case SDLK_KP_MINUS:

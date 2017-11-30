@@ -2381,8 +2381,8 @@ public:
         }
 
         // H.264
-        bool const ftyp = (4==fread(hdr+4, 1, 4, file) && 0==memcmp(hdr+4, "ftyp", 4));
-        if (ftyp) {
+        bool const h264 = (4==fread(hdr+4, 1, 4, file) && 0==memcmp(hdr+4, "ftyp", 4));
+        if (h264) {
             ftyp_ = 1;
 
             // skip ftyp box

@@ -62,7 +62,7 @@
 // disable temporarily
 //#define ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
 
-#ifdef HTC_VIVEPORT_RELEASE
+#ifdef BALAI_FINAL_RELEASE
 #ifdef ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
 #undef ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
 #endif
@@ -620,9 +620,9 @@ class CUVIDDecoder : public VideoDecoderImp
         }
 #endif
         // 1:1 aspect ratio conversion, depends on scaled resolution, ffmpeg/libavcodec/cuvid.c
-        dci.target_rect.left    = dci.target_rect.top = 0;
-        dci.target_rect.right   = (short) dci.ulTargetWidth;
-        dci.target_rect.bottom  = (short) dci.ulTargetHeight;
+        dci.target_rect.left   = dci.target_rect.top = 0;
+        dci.target_rect.right  = (short) dci.ulTargetWidth;
+        dci.target_rect.bottom = (short) dci.ulTargetHeight;
 
         int err = cuvidCreateDecoder(&cuvidDecoder_, &dci);
         if (CUDA_SUCCESS==err && NULL!=cuvidDecoder_) {
@@ -865,6 +865,7 @@ public:
                 dci.ulHeight            = codecpar->height;
                 dci.ulNumDecodeSurfaces = numSurfaces_; // FFmpeg set to 25
                 dci.CodecType           = nvCodec;
+              //dci.ChromaFormat        = cuvidFmt_.format.chroma_format;
                 dci.ChromaFormat        = cudaVideoChromaFormat_420;
                 if (cudaVideoCodec_JPEG==dci.CodecType) {
                     dci.ulCreationFlags = cudaVideoCreate_PreferCUDA;
@@ -1337,11 +1338,11 @@ prefer_decoder_(0)
         }
     }
 
-#ifndef HTC_VIVEPORT_RELEASE
-    if (0<=cuvidDeviceIndex_ || amfInit_) {
+    // i am not pretty sure about AMF, you?
+//    if (0<=cuvidDeviceIndex_ || amfInit_) {
+    if (0<=cuvidDeviceIndex_) {
         prefer_decoder_ = 1;
     }
-#endif
 }
 //---------------------------------------------------------------------------------------
 FFmpegHWAccelInitializer::~FFmpegHWAccelInitializer()
@@ -1467,7 +1468,7 @@ bool FFmpegHWAccelInitializer::TogglePreferVideoDecoder(int options,
             prefer_decoder_ = 0;
         }
 
-        return pre_bak!=prefer_decoder_;
+        return (pre_bak!=prefer_decoder_);
     }
     return false;
 }

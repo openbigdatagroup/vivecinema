@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vivecinema url="https://www.viveport.com/apps/ed3adb70-9390-4ca3-863a-26b5fd08b8d7" ver="0.9.624">
+ <credits>
+  <programmer name="andre chen" email="andre.hl.chen@gmail.com" />
+  <programmer name="yumei chen" email="yumeiohya@gmail.com" />
+ </credits>
+
+ <livestreams>
+  <!--
+   stream = tag name (don't care)
+   name = name shown in menu page
+   url = live stream url, Not that webpage url(working on it!!!)
+   sv3d = spatial video 3D (could be omitted, that will be plan 2D video)
+          180    : 180 degrees video
+          360    : 360 degrees video
+          180SBS : 180 + Side by side stereoscope 3D video
+          180TB  : 180 + Top Bottom stereoscope 3D video
+          360SBS : 360 + Side by side stereoscope 3D video
+          360TB  : 360 + Top Bottom stereoscope 3D video
+   sa3d = spatial audio 3D (if metadata missing)
+          ambiX : ambisonic data eXchange formats
+          fuma  : Furse-Malham
+   timeout[live stream only] = restart after internet traffic
+
+   Note : tag with the same url will be omitted!!!
+  <stream name="the 12th KKBOX Music Awards" url="http://stream-relay-1.kkbox.tv/live/smil:360Stream.smil/playlist.m3u8" sv3d="360" timeout="1000" />
+  <stream name="Theta S Live" url="rtmp://10.116.129.53/webcam2/live" />
+  <stream name="Local File" url="rtmp://10.116.129.53/vod2/SONG.mp4" />
+  <stream name="Webcam Live" url="rtmp://10.116.129.53/webcam/live" />
+  -->
+ </livestreams>
+
+ <videopaths>
+  <path url="D:/Vive Cinema" />
+  <!-- add your path here -->
+ </videopaths>
+
+ <videos>
+  <!-- 範例/example/exemplum/παράδειγμα/пример/ตัวอย่าง/ejemplo/उदाहरण -->
+  <video name="Google Spotlight Story - Pearl | 珍珠" url="D:/My Videos/Google Spotlight Story - Pearl.mp4" />
+  <video url="D:/VRC/tsai 2017-1C_00001_v2_100mbps_ambix.mp4" sv3d="360TB" />
+  <video url="D:/Spatial Audio/angelofarina/00-testdirections-1st.360.mono.mov" sv3d="360" />
+  <video url="D:/Spatial Audio/angelofarina/01-Moto+Cani-Malignano-1st.360.mono.mov" sv3d="360" sa3d="FuMa"/>
+ </videos>
+</vivecinema>

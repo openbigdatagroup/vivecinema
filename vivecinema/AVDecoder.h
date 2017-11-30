@@ -218,6 +218,9 @@ public:
     // name
     virtual char const* Name() const { return "InputStream"; }
 
+    // url
+    virtual char const* URL() const = 0;
+
     // ready to read from start, will be called when stream is opened.
     virtual bool Rewind() = 0; 
 
@@ -603,6 +606,9 @@ public:
         }
     }
     /////////////////////////////////////////////////////////////////////////////////////
+
+    // input stream
+    IInputStream const* InputStream() const { return inputStream_; }
 
     int GetDuration() const { return (duration_>0) ? int(duration_/1000):-1000; }
     int Timestamp() const; // timestamp in milliseconds
