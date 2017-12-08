@@ -441,7 +441,7 @@ wrapMode_(0),collisions_(COLLISION_DEFAULT)
 {
 }
 //---------------------------------------------------------------------------------------
-bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
+bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT fmt) const
 {
     if (NULL==sub.Buffer || sub.BufferSize<=0)
         return false;
@@ -451,7 +451,7 @@ bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
     sub.TimeEnd = sub.TimeStart = 0;
     char const* const begin = (char const*) sub.Buffer;
     char const* const end = begin + sub.BufferSize;
-    if (format==FORMAT_SRT) {
+    if (FORMAT_SRT==fmt) {
         int const reserve_dialogues = sub.BufferSize/32;
         sub.Dialogues.reserve(reserve_dialogues<2048 ? reserve_dialogues:2048);
         dial.Reset();
@@ -599,7 +599,7 @@ bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
 #endif
         }
     }
-    else if (format==FORMAT_ASS) {
+    else if (FORMAT_ASS==fmt) {
         if (0!=memcmp(begin, "[Script Info]", 13))
             return false;
 
@@ -748,7 +748,7 @@ bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
             }
         }
     }
-//  else if (format==FORMAT_XXX) { // more to come...
+//  else if (FORMAT_XXX==fmt) { // more to come...
 //  }
     else {
         return false;
@@ -757,7 +757,7 @@ bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
     int const total_dialogues = (int) sub.Dialogues.size();
     if (total_dialogues>0) {
         sub.Dialogues.sort();
-        sub.Format = format;
+        sub.Format = fmt;
 
         // this, sadly, is trying to fix Big5 low byte conflicting with ASCII.
         if (CP_UTF8!=sub.Codepage) {
@@ -818,7 +818,7 @@ bool Subtitle::ParseSubtitleStream_(SubStream& sub, FORMAT format) const
             char* ptr = (char*) utf8;
             char* const ptr_end = ptr + alloc_size;
 
-            if (format==FORMAT_ASS) {
+            if (FORMAT_ASS==fmt) {
                 memcpy(ptr, sub.Buffer, sub.StyleLength); ptr += sub.StyleLength;
                 *ptr++ = '\0';
             }
@@ -3827,16 +3827,16 @@ int Subtitle::Create(char const* videofile)
             if (0==(FILE_ATTRIBUTE_DIRECTORY&fd.dwFileAttributes)) {
                 int short_len = (int) wcslen(fd.cFileName);
                 if (short_len>4) {
-                    wchar_t const* ext = fd.cFileName + short_len - 4;
-                    if (*ext==L'.') {
-                        ++ext;
+                    wchar_t const* wext = fd.cFileName + short_len - 4;
+                    if (*wext==L'.') {
+                        ++wext;
                         int const loading_subtitle = totalExtSubtitleStreams_;
                         SubStream& sub = extSubtitleStreams_[loading_subtitle];
-                        if (0==memcmp(ext, L"srt", 3*sizeof(wchar_t)) || 0==memcmp(ext, L"SRT", 3*sizeof(wchar_t))) {
+                        if (0==memcmp(wext, L"srt", 3*sizeof(wchar_t)) || 0==memcmp(wext, L"SRT", 3*sizeof(wchar_t))) {
                             len = swprintf(wfilename, MAX_PATH, L"%s/%s", wfullpath, fd.cFileName);
                             AddSubtitleStream_(wfilename, FORMAT_SRT);
                         }
-                        else if (0==memcmp(ext, L"ass", 3*sizeof(wchar_t)) || 0==memcmp(ext, L"ASS", 3*sizeof(wchar_t))) {
+                        else if (0==memcmp(wext, L"ass", 3*sizeof(wchar_t)) || 0==memcmp(wext, L"ASS", 3*sizeof(wchar_t))) {
                             len = swprintf(wfilename, MAX_PATH, L"%s/%s", wfullpath, fd.cFileName);
                             AddSubtitleStream_(wfilename, FORMAT_ASS);
                         }

@@ -32,6 +32,8 @@
 #include "BLQuaternion.h"
 #include "BLPrimitives.h"
 
+#include "HWAccelDecoder.h"
+
 #ifndef HTC_VIVEPORT_RELEASE
 #include "BLJPEG.h" // load background 360 texture
 #include "BLPNG.h" // load UI
@@ -891,6 +893,9 @@ void VRVideoPlayer::RealignDashboard_(mlabs::balai::VR::TrackedDevice const* ctr
 //---------------------------------------------------------------------------------------
 bool VRVideoPlayer::Initialize()
 {
+    // hw context
+    mlabs::balai::video::hwaccel::InitContext(NULL);
+
     // init audio
     AudioConfig configs[4];
     configs[0].Format = AUDIO_FORMAT_F32;
@@ -1495,6 +1500,9 @@ void VRVideoPlayer::Finalize()
     }
 
     decoder_.Close(); // good to be here!?
+
+    // hw context
+    mlabs::balai::video::hwaccel::DeinitContext();
 
     subtitleFxCoeff_ = subtitleFxShadowColor_ = NULL;
     pan360Crop_ = pan360Diffuse_ = pan360NV12Crop_ = NULL;

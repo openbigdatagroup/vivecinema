@@ -29,40 +29,8 @@
  */
 #include "BLCore.h"
 
-// mutex
-#include <mutex>
-
 extern "C" {
 #include "libavformat/avformat.h"
-#include "libavutil/hwcontext.h"  // AVHWDeviceType, av_hwframe_transfer_data();
-}
-
-inline bool is_hwaccel_fmt_compatible(AVHWDeviceType type, AVPixelFormat pix_fmt) {
-    if (AV_HWDEVICE_TYPE_CUDA==type) {
-        return (AV_PIX_FMT_CUDA==pix_fmt);
-    }
-    else if (AV_HWDEVICE_TYPE_D3D11VA==type) {
-        //return (AV_PIX_FMT_D3D11==pix_fmt) || (AV_PIX_FMT_D3D11VA_VLD==pix_fmt) || (AV_PIX_FMT_DXVA2_VLD==pix_fmt);
-        //return (AV_PIX_FMT_D3D11==pix_fmt) || (AV_PIX_FMT_D3D11VA_VLD==pix_fmt);
-        return (AV_PIX_FMT_D3D11==pix_fmt);
-    }
-    else if (AV_HWDEVICE_TYPE_DXVA2==type) {
-        //return (AV_PIX_FMT_DXVA2_VLD==pix_fmt) || (AV_PIX_FMT_D3D11==pix_fmt) || (AV_PIX_FMT_D3D11VA_VLD==pix_fmt);
-        return (AV_PIX_FMT_DXVA2_VLD==pix_fmt);
-    }
-    else if (AV_HWDEVICE_TYPE_VAAPI==type) {
-        return (AV_PIX_FMT_VAAPI==pix_fmt);
-    }
-    else if (AV_HWDEVICE_TYPE_VDPAU==type) {
-        return (AV_PIX_FMT_VDPAU==pix_fmt);
-    }
-    else if (AV_HWDEVICE_TYPE_VIDEOTOOLBOX==type) { // apple
-        return (AV_PIX_FMT_VIDEOTOOLBOX==pix_fmt);
-    }
-    else if (AV_HWDEVICE_TYPE_QSV==type) {
-        return (AV_PIX_FMT_QSV==pix_fmt);
-    }
-    return false;
 }
 
 namespace mlabs { namespace balai { namespace video {
@@ -77,9 +45,9 @@ class VideoDecoderImp
 
 protected:
     VideoDecoderImp(AVCodecID cid):codec_id_(cid) {}
+    virtual ~VideoDecoderImp() {}
 
 public:
-    virtual ~VideoDecoderImp() {}
     AVCodecID CodecID() const { return codec_id_; }
 
     virtual char const* Name() const = 0;
@@ -93,51 +61,26 @@ public:
     virtual bool send_packet(AVPacket const& pkt) = 0;
     virtual bool receive_frame(uint8_t* nv12, int width, int height) = 0;
     virtual bool discard_frame() = 0;
+
+    // factory
+    static VideoDecoderImp* New(AVStream const* stream, int width, int height);
+    static void Delete(VideoDecoderImp* decoder);
 };
 
-struct DecoderConfig {
-    VideoDecoderImp* ExtDecoder;
-    AVCodec const*   Codec;
-    AVHWDeviceType   HWDeviceType;
-    int              Options;
-};
+// HW context
+namespace hwaccel {
+// [render thread]
+// init context after graphics context is created.
+// device should be object point to IDirect3DDevice9, ID3D11Device or NULL(OpenGL)
+// Preprocessor either INIT_CUDA_GL, INIT_CUDA_D3D9 or INIT_CUDA_D3D11 is mandatory.
+// (not actually test D3D/cuvid interop yet!)
+int InitContext(void* device);
 
-// manager
-class FFmpegHWAccelInitializer
-{
-    enum {
-        MAX_FFMPEG_HWACCELS_SUPPORTS = 16,
-        MAX_HWACCEL_CODECS = 16 // must > cudaVideoCodec_NumCodecs(11)
-    };
+// [render thread]
+void DeinitContext();
 
-    // decode max size
-    struct MinMaxSize {
-        int MaxWidth, MaxHeight;
-        int MinWidth, MinHeight;
-    };
-
-    // FFmpeg - to utilize AVHWDevice, you must confirm the relate ffmpeg hw build options are on.
-    AVHWDeviceType hwAccels_[MAX_FFMPEG_HWACCELS_SUPPORTS];
-    MinMaxSize     cuvidDecoderCap_[MAX_HWACCEL_CODECS];
-    std::mutex mutex_;
-    int availableFFmpegAVHWDevices_;
-    int cuvidDeviceIndex_;
-    int amfInit_;
-    int activeDecoders_, totalDecoders_;
-    int prefer_decoder_; // 0:internal(FFmpeg), 1:external(AMF/NEDEC), 2+:external + hw accel support.
-
-public:
-    FFmpegHWAccelInitializer();
-    ~FFmpegHWAccelInitializer();
-
-    int AddReferenceCount();
-    void RemoveReferenceCount();
-
-    // return false if not tweakable.
-    bool TogglePreferVideoDecoder(int options, AVStream const* stream, int width, int height);
-
-    // create decoder
-    bool FindVideoDecoder(DecoderConfig& dconfig, AVStream const* stream, int width, int height);
-};
+// how is GPU accelerated
+int GPUAccelScore();
+}
 
 }}}

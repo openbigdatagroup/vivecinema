@@ -94,9 +94,10 @@ namespace mlabs { namespace balai { namespace framework {
  *   2017.09.27 ver 0.9.561 - loop(repeat) version (for Golden Bell Awards event)
  *   2017.09.28 ver 0.9.562 - final RC. ready to open source. waiting for final video from VRC Jack.
  *   2017.09.29 ver 0.9.563 - GPL3 license, open source https://github.com/openbigdatagroup/vivecinema
- *   2017.11.30 ver 0.9.624 - fix subtitle sleep, remove async, the last viveport submit.
+ *   2017.11.30 ver 0.9.624 - (12th <the last?> submit) fix subtitle sleep, remove async.
+ *   2017.12.08 ver 0.9.632 - Fix NVDEC hevc main10/12 profile GP10x GPU
  */
-char const* const buildNo = "Vive Cinema Build 0.9.624";
+char const* const buildNo = "Vive Cinema Build 0.9.632";
 
 #define DRAW_SINGLE_VIEW
 #ifdef DRAW_SINGLE_VIEW

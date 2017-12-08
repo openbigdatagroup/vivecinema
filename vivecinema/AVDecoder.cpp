@@ -30,6 +30,21 @@
 #include "AVDecoder.h"
 #include "HWAccelDecoder.h"
 
+//
+// Important Note to utilize FFmpeg's hardware decoders/accelerators(AVHWDeviceType):
+//  1. it depends on the FFmpeg build options. check avutil_configuration().
+//  2. prefer NVDEC or AMF, since these implemantaions are fully on me/you!
+//  3. prefer specialized HW AVCodec over general AVCodec + AVHWAccel.
+//  4. check more HEVC videos(CUDA/D3D11VA) to see if it really works.
+//  5. It works on GFX 1080 Ti, although with warning messages and crashes(when switching decoder) sometimes
+//
+// If you have better implementation on this, kindly let me know. andre.hl.chen@gmail.com.
+// ~~~ much appreciated. ~~~
+//
+// disable temporarily
+//#define ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
+//
+
 extern "C" {
 // Whenever av_gettime() is used to measure relative period of time,
 // av_gettime_relative() is prefered as it guarantee monotonic time
@@ -119,6 +134,9 @@ extern "C" {
 // the normal audio buffering is about few hundreds milliseconds.
 //
 #define INIT_AUDIO_BUFFER_SIZE 1920000
+
+// AVIO (customized stream source) buffer default size
+#define AVIO_BUFFER_DEFAULT_SIZE 4096
 
 // audio time fade in, nanoseconds
 int const AUDIO_FADE_IN_TIME = (AV_TIME_BASE*1);
@@ -368,10 +386,164 @@ inline bool is_hwaccel_pix_fmt(AVPixelFormat pix_fmt) {
     return (NULL!=desc) && (0!=(desc->flags & AV_PIX_FMT_FLAG_HWACCEL));
 }
 
+inline bool is_hwaccel_fmt_compatible(AVHWDeviceType type, AVPixelFormat pix_fmt) {
+    if (AV_HWDEVICE_TYPE_CUDA==type) {
+        return (AV_PIX_FMT_CUDA==pix_fmt);
+    }
+    else if (AV_HWDEVICE_TYPE_D3D11VA==type) {
+        //return (AV_PIX_FMT_D3D11==pix_fmt) || (AV_PIX_FMT_D3D11VA_VLD==pix_fmt) || (AV_PIX_FMT_DXVA2_VLD==pix_fmt);
+        //return (AV_PIX_FMT_D3D11==pix_fmt) || (AV_PIX_FMT_D3D11VA_VLD==pix_fmt);
+        return (AV_PIX_FMT_D3D11==pix_fmt);
+    }
+    else if (AV_HWDEVICE_TYPE_DXVA2==type) {
+        //return (AV_PIX_FMT_DXVA2_VLD==pix_fmt) || (AV_PIX_FMT_D3D11==pix_fmt) || (AV_PIX_FMT_D3D11VA_VLD==pix_fmt);
+        return (AV_PIX_FMT_DXVA2_VLD==pix_fmt);
+    }
+    else if (AV_HWDEVICE_TYPE_VAAPI==type) {
+        return (AV_PIX_FMT_VAAPI==pix_fmt);
+    }
+    else if (AV_HWDEVICE_TYPE_VDPAU==type) {
+        return (AV_PIX_FMT_VDPAU==pix_fmt);
+    }
+    else if (AV_HWDEVICE_TYPE_VIDEOTOOLBOX==type) { // apple
+        return (AV_PIX_FMT_VIDEOTOOLBOX==pix_fmt);
+    }
+    else if (AV_HWDEVICE_TYPE_QSV==type) {
+        return (AV_PIX_FMT_QSV==pix_fmt);
+    }
+    return false;
+}
+
 namespace mlabs { namespace balai { namespace video {
 
-// FFmpeg and other decoder initializer & management
-static FFmpegHWAccelInitializer FFmpegHWAccelInitializer_;
+// FFmpeg codec initializer & management
+class FFmpegInitializer
+{
+    enum { MAX_FFMPEG_HWACCELS_SUPPORTS = 30 };
+
+    // FFmpeg - to utilize AVHWDevice, you must confirm the relate ffmpeg hw build options are on.
+    AVHWDeviceType hwAccels_[MAX_FFMPEG_HWACCELS_SUPPORTS];
+    std::mutex mutex_;
+    int   numAVHWDevices_;
+    uint8 inited_;
+
+public:
+    FFmpegInitializer():mutex_(),numAVHWDevices_(0),inited_(0) {
+        for (int i=0; i<MAX_FFMPEG_HWACCELS_SUPPORTS; ++i) {
+            hwAccels_[i] = AV_HWDEVICE_TYPE_NONE;
+        }
+
+        // initialize FFmpeg - register all AVCodecs and HWAccels...
+        av_register_all();
+
+#ifdef ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
+        AVHWDeviceType type = AV_HWDEVICE_TYPE_NONE;
+        AVBufferRef* hw_device_ctx = NULL;
+        while (numAVHWDevices_<MAX_FFMPEG_HWACCELS_SUPPORTS &&
+               AV_HWDEVICE_TYPE_NONE!=(type=av_hwdevice_iterate_types(type))) {
+            if (av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0)>=0) {
+                hwAccels_[numAVHWDevices_++] = type;
+                av_buffer_unref(&hw_device_ctx);
+            }
+        }
+#endif
+
+#ifdef BL_AVDECODER_VERBOSE
+        BL_LOG("**\n** FFmpeg version : %X(%s)\n", avcodec_version(), av_version_info());
+        BL_LOG("** License : %s\n", avutil_license());
+        BL_LOG("** Build config : %s\n", avutil_configuration());
+        if (numAVHWDevices_>0) {
+            BL_LOG("** HWAccel :");
+            for (int i=0; i<numAVHWDevices_; ++i) {
+                BL_LOG(" %s", av_hwdevice_get_type_name(hwAccels_[i]));
+            }
+            BL_LOG("\n**\n");
+        }
+#endif
+
+#if 0
+        AVCodec* codec = NULL;
+        while (NULL!=(codec = av_codec_next(codec))) {
+            if (AVMEDIA_TYPE_VIDEO==codec->type && av_codec_is_decoder(codec)) {
+                BL_LOG("AVCodec:%s | %s", codec->name, codec->long_name);
+                if (codec->pix_fmts) {
+                    BL_LOG(" | ");
+                    for (AVPixelFormat const* fmt=codec->pix_fmts; AV_PIX_FMT_NONE!=*fmt; ++fmt) {
+                        BL_LOG(" %s", av_get_pix_fmt_name(*fmt));
+                    }
+                }
+                BL_LOG("\n");
+            }
+        }
+
+        AVHWAccel* hwaccel = NULL;
+        while (NULL!=(hwaccel = av_hwaccel_next(hwaccel))) {
+            if (AVMEDIA_TYPE_VIDEO==hwaccel->type) {
+                BL_LOG("AVHWAccel:%s | %s(%d) | %s\n", hwaccel->name, av_get_pix_fmt_name(hwaccel->pix_fmt), hwaccel->pix_fmt, is_hwaccel_pix_fmt(hwaccel->pix_fmt)? "HW":"SW");
+            }
+        }
+#endif
+    }
+    ~FFmpegInitializer() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (inited_) {
+            avformat_network_deinit();
+            inited_ = 0;
+        }
+    }
+
+    void Init() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!inited_ && 0==avformat_network_init()) {
+            inited_ = 1;
+        }
+    }
+
+    AVHWDeviceType GetHWAccelType(AVCodec const*& hwcodec, uint32& flags, AVCodecID codec_id, int options) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        hwcodec = NULL;
+        flags = 0;
+        AVHWDeviceType hwtype = AV_HWDEVICE_TYPE_NONE;
+        for (int i=0; i<numAVHWDevices_; ++i) {
+            AVHWDeviceType const type = hwAccels_[i];
+            assert(AV_HWDEVICE_TYPE_NONE!=type);
+
+            //
+            // Look for AVCodec first!
+            //
+            // refer libavcodec/allcodecs.c, register_all() for all possible codecs.
+            // eg, libavcodec/cuvid.c
+            //
+            AVCodec const* codec = NULL;
+            while (NULL!=(codec=av_codec_next(codec))) {
+                if (codec_id==codec->id && av_codec_is_decoder(codec) &&
+                    codec->pix_fmts && is_hwaccel_fmt_compatible(type, codec->pix_fmts[0])) {
+                    flags |= uint32(1<<i);
+                    break;
+                }
+            }
+
+            if (NULL==codec) {
+                AVHWAccel* hwaccel = NULL;
+                while (NULL!=(hwaccel=av_hwaccel_next(hwaccel))) {
+                    if (codec_id==hwaccel->id && is_hwaccel_fmt_compatible(type, hwaccel->pix_fmt)) {
+                        flags |= uint32(1<<i);
+                        break;
+                    }
+                }
+            }
+
+            if (options==i && (flags&uint32(1<<i))) {
+                hwcodec = codec;
+                hwtype = type;
+            }
+        }
+
+        return hwtype;
+    }
+
+} ffmpegInitializer;
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //#define TEST_AMF_FAIL_CASE
@@ -444,7 +616,7 @@ char const* VideoDecoder::Name() const
     return "FFmpeg (CPU)";
 }
 //---------------------------------------------------------------------------------------
-bool VideoDecoder::Init(AVStream* stream, int w, int h)
+bool VideoDecoder::Init(AVStream* stream, int w, int h, uint8& options)
 {
     assert(stream);
     assert(w>0 && h>0 && 0==(w&1) && 0==(1&h));
@@ -459,7 +631,7 @@ bool VideoDecoder::Init(AVStream* stream, int w, int h)
 
         AVCodecID const codec_id = codecpar->codec_id;
         if (NULL!=pImp_ && codec_id!=pImp_->CodecID()) {
-            delete pImp_;
+            VideoDecoderImp::Delete(pImp_);
             pImp_ = NULL;
         }
 
@@ -470,107 +642,118 @@ bool VideoDecoder::Init(AVStream* stream, int w, int h)
         }
 
         if (NULL==pImp_ && NULL==avctx_) {
-            DecoderConfig dconfig;
-            if (!FFmpegHWAccelInitializer_.FindVideoDecoder(dconfig, stream, w, h)) {
-                return false;
-            }
-
-            if (dconfig.ExtDecoder) {
-                pImp_ = dconfig.ExtDecoder;
-#ifdef BL_AVDECODER_VERBOSE
-                BL_LOG("** video decoder : %s\n", pImp_->Name());
-#endif
-                if (dconfig.Options<2)
-                    dconfig.Options = 2; 
+            // GPU accelerated video decoder
+            pImp_ = VideoDecoderImp::New(stream, w, h);
+            if (pImp_) {
+                flags_ = 0x02;
+                if (1!=options) {
+                    VideoDecoderImp::Delete(pImp_);
+                    pImp_ = NULL;
+                }
             }
             else {
-                assert(NULL!=dconfig.Codec);
-                if (NULL==dconfig.Codec) { // !
-                    dconfig.Codec = avcodec_find_decoder(codec_id);
-                    if (NULL==dconfig.Codec) {
-                        return false;
-                    }
-                    dconfig.HWDeviceType = AV_HWDEVICE_TYPE_NONE;
-                    dconfig.Options = 1;
+                flags_ = 0;
+                if (1==options) {
+                    options = 0;
                 }
+            }
 
-                AVCodec const* codec = dconfig.Codec;
-                avctx_ = avcodec_alloc_context3(codec);
-                if (NULL==avctx_) {
-                    return false;
+            uint32 hw_flags = 0;
+            AVCodec const* codec = NULL;
+            avctx_hwaccel_ = ffmpegInitializer.GetHWAccelType(codec, hw_flags, codec_id, options>2 ? int(options-2):-1);
+            if (AV_HWDEVICE_TYPE_NONE==avctx_hwaccel_) {
+                if (options>2)
+                    options = 0;
+            }
+
+            if (NULL==codec) {
+                codec = avcodec_find_decoder(codec_id);
+                if (NULL==codec) {
+                    return (NULL!=pImp_);
                 }
+            }
 
-                if (0<=avcodec_parameters_to_context(avctx_, codecpar)) {
-                    avctx_->opaque = this;
-                    avctx_hwaccel_ = dconfig.HWDeviceType;
+            avctx_ = avcodec_alloc_context3(codec);
+            if (NULL==avctx_) {
+                return (NULL!=pImp_);
+            }
+
+
+            if (0<=avcodec_parameters_to_context(avctx_, codecpar)) {
+                avctx_->opaque = this;
+
+                //
+                // Using threaded decoding by default breaks backward compatibility if
+                // AVHWAccel is used or if an appliction sets threadunsafe callbacks.
+                //
+                // https://lists.ffmpeg.org/pipermail/ffmpeg-cvslog/2012-January/046142.html
+                //
+                if (AV_HWDEVICE_TYPE_NONE!=avctx_hwaccel_) {
+                    // set callback to negotiate the pixel format
+                    avctx_->get_format = s_get_format_;
 
                     //
-                    // Using threaded decoding by default breaks backward compatibility if
-                    // AVHWAccel is used or if an appliction sets threadunsafe callbacks.
+                    // it seems you don't need a hw_device_ctx, if AVCodec is of HW type.
                     //
-                    // https://lists.ffmpeg.org/pipermail/ffmpeg-cvslog/2012-January/046142.html
-                    //
-                    if (AV_HWDEVICE_TYPE_NONE!=avctx_hwaccel_) {
-                        // set callback to negotiate the pixel format
-                        avctx_->get_format = s_get_format_;
-
-                        //
-                        // it seems you don't need a hw_device_ctx, if AVCodec is of HW type.
-                        //
-                        if (NULL==codec->pix_fmts || !is_hwaccel_fmt_compatible(avctx_hwaccel_, codec->pix_fmts[0])) {
-                            int const err = av_hwdevice_ctx_create(&(avctx_->hw_device_ctx), avctx_hwaccel_, NULL, NULL, 0);
-                            if (err>=0) {
-                                avctx_->get_format = s_get_format_;
-                            }
-                            else {
-                                BL_LOG("Failed to create specified HW device(%d).\n", err);
-                                avctx_hwaccel_ = AV_HWDEVICE_TYPE_NONE;
-                            }
+                    if (NULL==codec->pix_fmts || !is_hwaccel_fmt_compatible(avctx_hwaccel_, codec->pix_fmts[0])) {
+                        int const err = av_hwdevice_ctx_create(&(avctx_->hw_device_ctx), avctx_hwaccel_, NULL, NULL, 0);
+                        if (err>=0) {
+                            avctx_->get_format = s_get_format_;
+                        }
+                        else {
+                            BL_LOG("Failed to create specified HW device(%d).\n", err);
+                            avctx_hwaccel_ = AV_HWDEVICE_TYPE_NONE;
                         }
                     }
+                }
 
-                    AVDictionary* codec_opts = NULL;
-                    av_opt_set_int(avctx_, "refcounted_frames", 1, 0);
-                    if (AV_HWDEVICE_TYPE_NONE!=avctx_hwaccel_) {
-                        av_dict_set(&codec_opts, "threads", "auto", 0); //???
-                    }
-                    else {
-                        av_dict_set(&codec_opts, "threads", "auto", 0);
-                    }
+                AVDictionary* codec_opts = NULL;
+                av_opt_set_int(avctx_, "refcounted_frames", 1, 0);
+                if (AV_HWDEVICE_TYPE_NONE!=avctx_hwaccel_) {
+                    av_dict_set(&codec_opts, "threads", "auto", 0); //???
+                }
+                else {
+                    av_dict_set(&codec_opts, "threads", "auto", 0);
+                }
 
-                    // open
-                    if (0==avcodec_open2(avctx_, codec, &codec_opts)) {
-                        if (AV_HWDEVICE_TYPE_NONE==avctx_hwaccel_ && 0==(avctx_->active_thread_type&FF_THREAD_FRAME)) {
-                            char codecInfo[256];
-                            avcodec_string(codecInfo, 256, avctx_, false);
-                            BL_ERR("\n** video : codecCtx->active_thread_type=%d video decoding could be slow!!!\n(%s)\n\n",
-                                avctx_->active_thread_type, codecInfo);
-                        }
-
-                        // set packet timebase
-                        av_codec_set_pkt_timebase(avctx_, stream->time_base);
-                        assert(0==av_cmp_q(av_codec_get_pkt_timebase(avctx_), stream->time_base));
-                        // not necessary true!!!
-                        // assert(0==av_cmp_q(av_codec_get_pkt_timebase(avctx_), avctx_->time_base)); 
-                    }
-                    else {
-                        avcodec_free_context(&avctx_);
-                        avctx_ = NULL;
+                // open
+                if (0==avcodec_open2(avctx_, codec, &codec_opts)) {
+                    if (AV_HWDEVICE_TYPE_NONE==avctx_hwaccel_ && 0==(avctx_->active_thread_type&FF_THREAD_FRAME)) {
+                        char codecInfo[256];
+                        avcodec_string(codecInfo, 256, avctx_, false);
+                        BL_ERR("\n** video : codecCtx->active_thread_type=%d video decoding could be slow!!!\n(%s)\n\n",
+                            avctx_->active_thread_type, codecInfo);
                     }
 
-                    if (NULL!=codec_opts) {
-                        av_dict_free(&codec_opts);
-                        codec_opts = NULL;
-                    }
+                    // set packet timebase
+                    av_codec_set_pkt_timebase(avctx_, stream->time_base);
+                    assert(0==av_cmp_q(av_codec_get_pkt_timebase(avctx_), stream->time_base));
+                    // not necessary true!!!
+                    // assert(0==av_cmp_q(av_codec_get_pkt_timebase(avctx_), avctx_->time_base)); 
                 }
                 else {
                     avcodec_free_context(&avctx_);
                     avctx_ = NULL;
-                    return false;
+                }
+
+                if (NULL!=codec_opts) {
+                    av_dict_free(&codec_opts);
+                    codec_opts = NULL;
                 }
             }
+            else {
+                avcodec_free_context(&avctx_);
+                avctx_ = NULL;
+                return false;
+            }
 
-            applicable_decoders_ = dconfig.Options;
+            flags_ |= (uint32(hw_flags<<2) | 1);
+
+#ifdef BL_AVDECODER_VERBOSE
+            if (NULL!=pImp_) {
+                BL_LOG("** video decoder : %s\n", pImp_->Name());
+            }
+#endif
         }
 
         if (NULL!=avctx_ || NULL!=pImp_) {
@@ -587,7 +770,7 @@ void VideoDecoder::Clear()
     av_frame_unref(&frame_);
     stream_ = NULL;
     if (NULL!=pImp_) {
-        delete pImp_;
+        VideoDecoderImp::Delete(pImp_);
         pImp_ = NULL;
     }
     if (NULL!=avctx_) {
@@ -600,7 +783,7 @@ void VideoDecoder::Clear()
         swsctx_ = NULL;
     }
     avctx_hwaccel_ = AV_HWDEVICE_TYPE_NONE;
-    packet_cnt_ = frame_cnt_ = applicable_decoders_ = 0;
+    packet_cnt_ = frame_cnt_ = flags_ = 0;
 }
 //---------------------------------------------------------------------------------------
 bool VideoDecoder::Resume()
@@ -961,6 +1144,7 @@ audioExtStreamIndex1_(-1),audioExtStreamIndex2_(-1),audioExtStreamIndex3_(-1),
 videoWidth_(0),videoHeight_(0),videoFrameRate100x_(0),
 subtitleDuration_(0),subtitleWidth_(0),subtitleHeight_(0),subtitleRectCount_(0),
 audioBytesPerFrame_(0),audioBytesPerSecond_(0),
+videoDecoderPreference_(0xff),
 subtitleGraphicsFmt_(0),
 subtitleBufferFlushing_(0),
 audioBufferFlushing_(0),
@@ -969,7 +1153,7 @@ endOfStream_(0),
 interruptRequest_(0)
 {
     // add decoder counter
-    FFmpegHWAccelInitializer_.AddReferenceCount();
+    ffmpegInitializer.Init();
 
     // init packet free list
     memset(avPackets_, 0, sizeof(avPackets_));
@@ -1024,9 +1208,6 @@ AVDecoder::~AVDecoder()
     free(audioBuffer_);
     audioBuffer_ = NULL;
     audioBufferCapacity_ = 0;
-
-    // remove counter
-    FFmpegHWAccelInitializer_.RemoveReferenceCount();
 }
 //---------------------------------------------------------------------------------------
 bool AVDecoder::DoOpen_(AVFormatContext* fmtCtx,  char const* url, VideoOpenOption const* param)
@@ -1281,7 +1462,15 @@ bool AVDecoder::DoOpen_(AVFormatContext* fmtCtx,  char const* url, VideoOpenOpti
         subtitleUtil_.SetMoiveResolution(videoWidth_, videoHeight_);
 
         // video decoder
-        videoDecoder_.Init(stream, videoWidth_, videoHeight_);
+        if (0xff==videoDecoderPreference_) {
+            if (1<hwaccel::GPUAccelScore()) {
+                videoDecoderPreference_ = 1; // GPU
+            }
+            else {
+                videoDecoderPreference_ = 0;
+            }
+        }
+        videoDecoder_.Init(stream, videoWidth_, videoHeight_, videoDecoderPreference_);
 
         // allocate pixel buffer
         videoFrameDataSize_ = av_image_get_buffer_size(AV_PIX_FMT_NV12, videoWidth_, videoHeight_, 4);
@@ -1651,13 +1840,26 @@ void AVDecoder::DoClose_()
 //---------------------------------------------------------------------------------------
 bool AVDecoder::ToggleHardwareVideoDecoder()
 {
-    // stop() and start() lock(asyncPlayMutex_);
+    // stop() and start() lock(asyncPlayMutex_); so don't do this...
     //std::lock_guard<std::mutex> lock(asyncPlayMutex_);
-    if (NULL!=formatCtx_&&
-        FFmpegHWAccelInitializer_.TogglePreferVideoDecoder(videoDecoder_.NumAvailableVideoDecoders(), formatCtx_->streams[videoStreamIndex_], videoWidth_, videoHeight_) && Stop()) {
-        videoDecoder_.Clear();
-        int const time = VideoTime() - 3000;
-        return PlayAt(time>0 ? time:0); // not OK if just return Play()!!!
+    if (NULL!=formatCtx_) {
+        uint32 const flags = videoDecoder_.Flags();
+        if (flags>1) {
+            uint32 new_decoder = (videoDecoderPreference_+1)%32;
+            while (new_decoder!=videoDecoderPreference_) {
+                if (flags&(1<<new_decoder)) {
+                    break;
+                }
+                new_decoder = (new_decoder+1)%32;
+            }
+
+            if (new_decoder!=videoDecoderPreference_ && Stop()) {
+                videoDecoderPreference_ = (uint8) new_decoder;
+                videoDecoder_.Clear();
+                int const time = VideoTime() - 3000;
+                return PlayAt(time>0 ? time:0); // not OK if just return Play()!!!
+            }
+        }
     }
 
     return false;
@@ -2076,7 +2278,7 @@ bool AVDecoder::VideoThread_()
     int64_t pkt_pts(AV_NOPTS_VALUE), pkt_dts(AV_NOPTS_VALUE);
     int64_t frame_pts(AV_NOPTS_VALUE), frame_duration(AV_NOPTS_VALUE);
 
-    videoDecoder_.Init(stream, videoWidth_, videoHeight_);
+    videoDecoder_.Init(stream, videoWidth_, videoHeight_, videoDecoderPreference_);
     videoDecoder_.Resume();
 
     // drop frames
@@ -2765,7 +2967,7 @@ static bool blend_subrectRGBA8(uint8_t*& base, int& alloc_size, int& x, int&y, i
     return true;
 }
 
-bool AVDecoder::AudioAndSubtitleThread_()
+bool AVDecoder::AudioSubtitleThread_()
 {
     assert(NULL!=formatCtx_);
     assert(0==subtitlePut_ && 0==subtitleGet_);
@@ -3709,7 +3911,7 @@ void AVDecoder::MainThread_()
 
     // subtitle and audio thread
     if (audio_stream || subtitle_stream) {
-        audiosubtitleThread = move(thread([this] { AudioAndSubtitleThread_(); }));
+        audiosubtitleThread = move(thread([this] { AudioSubtitleThread_(); }));
     }
 
     timeAudioCrossfade_ = timeStartSysTime_ = timeInterruptSysTime_ = 0;
@@ -4178,7 +4380,7 @@ void AVDecoder::SeekThread_()
     int seek_timestamp = -1000;
     bool reset_bad_duration = true;
 
-    videoDecoder_.Init(stream, videoWidth_, videoHeight_);
+    videoDecoder_.Init(stream, videoWidth_, videoHeight_, videoDecoderPreference_);
     videoDecoder_.Resume();
 
     while (STATUS_SEEKING==status_) {

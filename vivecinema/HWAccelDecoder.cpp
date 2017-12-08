@@ -32,6 +32,7 @@
 //
 // nVidia Video Codec SDK
 #include "dynlink_nvcuvid.h"
+#include "dynlink_cudaGL.h"  // cuda and GL interop
 
 //
 // Advanced Micro Devices(AMD) Advanced Media Framework(AMF) SDK
@@ -47,26 +48,12 @@
 #include "./amf/public/include/components/VideoDecoderUVD.h"
 #include "./amf/public/common/Thread.h" // amf_sleep()
 
-//
-// Important Note to utilize FFmpeg's hardware decoders/accelerators(AVHWDeviceType):
-//  1. it depends on the FFmpeg build options. check avutil_configuration().
-//  2. prefer NVDEC or AMF, since these implemantaions are fully on me/you!
-//  3. prefer specialized HW AVCodec over general AVCodec + AVHWAccel.
-//     refer FFmpegHWAccelInitializer::FindVideoDecoder(...)
-//  4. check more HEVC videos(CUDA/D3D11VA) to see if it really works.
-//  5. It works on GFX 1080 Ti, although with warning messages and crashes(when switching decoder) sometimes
-//
-// If you have better implementation on this, kindly let me know. andre.hl.chen@gmail.com.
-// ~~~ much appreciated. ~~~
-//
-// disable temporarily
-//#define ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
+#include <mutex>
 
-#ifdef BALAI_FINAL_RELEASE
-#ifdef ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
-#undef ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
-#endif
-#endif
+//
+// not ready yet!
+//#define CUVID_ENABLE_HDR_OUTPUT
+//
 
 namespace mlabs { namespace balai { namespace video {
 
@@ -171,10 +158,35 @@ inline int cuvidGetNumSurfaces(cudaVideoCodec nvCodec, int width, int height)
 }
 
 //
+// GPU context for NVDEC and AMD AMF
+struct GPUContext
+{
+    struct MaxSize {
+        int Width, Height;
+        MaxSize():Width(0),Height(0) {}
+    } cuvidCaps8[cudaVideoCodec_NumCodecs], 
+    cuvidCaps10[cudaVideoCodec_NumCodecs],
+    cuvidCaps12[cudaVideoCodec_NumCodecs];
+    std::mutex       mutex;
+    CUcontext        cudaContext;
+    amf::AMFContext* amfContext;
+    int              activeDecoders;
+    int              init;
+
+    GPUContext():mutex(),cudaContext(NULL),amfContext(NULL),activeDecoders(0),init(0) {}
+    ~GPUContext() {
+        std::lock_guard<std::mutex> lock(mutex);
+        assert(NULL==cudaContext);
+        assert(NULL==amfContext);
+        assert(0==init&&0==activeDecoders);
+    }
+} gpuCtx;
+
+//
 // AMD AMF decoder
 class AMFDecoder : public VideoDecoderImp
 {
-    amf::AMFContextPtr   context_;
+    amf::AMFContext*     context_;
     amf::AMFComponentPtr decoder_;
     amf::AMFDataPtr      frame_;
     int const            width_;
@@ -197,7 +209,7 @@ public:
             decoder_ = NULL;
         }
         if (context_) {
-            context_->Terminate();
+            //context_->Terminate();
             context_ = NULL;
         }
     }
@@ -205,13 +217,12 @@ public:
     // identity
     char const* Name() const { return "AMD AMF (GPU)"; }
 
-    bool Init(AVCodecParameters* codecpar) {
+    bool Init(amf::AMFContext* ctx, AVCodecParameters* codecpar) {
         assert(nullptr==context_ && nullptr==decoder_);
         wchar_t const* codec = getAMFCodec(CodecID());
-        if (codecpar && codec && AMF_OK==g_AMFFactory.GetFactory()->CreateContext(&context_) && context_) {
-           if (AMF_OK==context_->InitDX9(NULL) &&
-//         if (AMF_OK==context_->InitDX11(NULL) &&
-                AMF_OK==g_AMFFactory.GetFactory()->CreateComponent(context_, codec, &decoder_)) {
+        if (codecpar && codec && ctx) {
+            context_ = ctx;
+            if (AMF_OK==g_AMFFactory.GetFactory()->CreateComponent(context_, codec, &decoder_)) {
 #if 0
                 // report error if hevc... [2017/09/14] AMD Mikhail Mironov : "It's a bug!!!"
                 // [2017/09/22] Mikhail Mironov fixed in driver 17.9.2 released today.
@@ -513,7 +524,7 @@ public:
 };
 
 //
-// nVidia cuvid decoder
+// nVidia cuvid decoder. reference ffmpeg/libavcodec/cuvid.c
 class CUVIDDecoder : public VideoDecoderImp
 {
     enum { MAX_CUVID_PARSED_FRAMES = 32 };
@@ -552,16 +563,16 @@ class CUVIDDecoder : public VideoDecoderImp
         format.display_aspect_ratio     = fmt->display_aspect_ratio;
         format.video_signal_description = fmt->video_signal_description;
         if (cuvidDecoder_) {
-            if (format.codec==fmt->codec &&
+            if (format.coded_width==fmt->coded_width && format.coded_height==fmt->coded_height &&
+                format.codec==fmt->codec &&
+                format.chroma_format==fmt->chroma_format &&
                 format.progressive_sequence==fmt->progressive_sequence &&
                 format.bit_depth_luma_minus8==fmt->bit_depth_luma_minus8 &&
                 format.bit_depth_chroma_minus8==fmt->bit_depth_chroma_minus8 &&
-                format.coded_width==fmt->coded_width && format.coded_height==fmt->coded_height &&
                 format.display_area.left==fmt->display_area.left &&
                 format.display_area.top==fmt->display_area.top &&
                 format.display_area.right==fmt->display_area.right &&
-                format.display_area.bottom==fmt->display_area.bottom &&
-                format.chroma_format==fmt->chroma_format) {
+                format.display_area.bottom==fmt->display_area.bottom) {
                 return true;
             }
 
@@ -583,11 +594,11 @@ class CUVIDDecoder : public VideoDecoderImp
         // but it may be that ffmpeg don't take JPEG. By disabling JPEG HW support,
         // it's safe.
         dci.ulCreationFlags = cudaVideoCreate_PreferCUVID; // prefer cuvid
-        if (cudaVideoCodec_JPEG==dci.CodecType) {
-            dci.ulCreationFlags = cudaVideoCreate_PreferCUDA;
-        }
+//        if (cudaVideoCodec_JPEG==dci.CodecType) {
+//            dci.ulCreationFlags = cudaVideoCreate_PreferCUDA;
+//        }
 
-        dci.bitDepthMinus8      = 0; // The value "BitDepth minus 8"
+        dci.bitDepthMinus8      = fmt->bit_depth_luma_minus8; // The value "BitDepth minus 8"
         dci.ulIntraDecodeOnly   = 0; // Set 1 only if video has all intra frames (default value is 0).
                                      // This will optimize video memory for Intra frames only decoding
 
@@ -596,12 +607,17 @@ class CUVIDDecoder : public VideoDecoderImp
         dci.display_area.right  = (short) fmt->display_area.right;
         dci.display_area.bottom = (short) fmt->display_area.bottom;
 
+        // output format
         dci.OutputFormat        = cudaVideoSurfaceFormat_NV12;
+#ifdef CUVID_ENABLE_HDR_OUTPUT
+        if (dci.bitDepthMinus8)
+            dci.OutputFormat    = cudaVideoSurfaceFormat_P016;
+#endif
+        // deinterlacing
         dci.DeinterlaceMode     = cudaVideoDeinterlaceMode_Weave;
         if (0==fmt->progressive_sequence) {
             // cudaVideoDeinterlaceMode_Adaptive needs more video memory than other DImodes.
-            dci.DeinterlaceMode = cudaVideoDeinterlaceMode_Adaptive; // ???
-            //dci.DeinterlaceMode = cudaVideoDeinterlaceMode_Bob;    // Drop one field
+            dci.DeinterlaceMode = cudaVideoDeinterlaceMode_Adaptive;
         }
 
         // target width/height must be multiple of 2
@@ -609,16 +625,15 @@ class CUVIDDecoder : public VideoDecoderImp
         dci.ulTargetWidth       = width_;
         dci.ulTargetHeight      = height_;
         dci.ulNumOutputSurfaces = 1; // ffmpeg/libavcodec/cuvid.c
-#if 1
-        dci.vidLock = NULL; // no need!
-#else
+
         // context lock used for synchronizing ownership of the cuda context.
         // needed for cudaVideoCreate_PreferCUDA decode???
-        if (cudaVideoCreate_PreferCUDA==dci.ulCreationFlags) {
-            cuvidCtxLockCreate(&cuda_ctx_lock_, cuda_ctx_); // warning, this may leak!
-            dci.vidLock = cuda_ctx_lock_;
-        }
-#endif
+        dci.vidLock = NULL;
+//        if (cudaVideoCreate_PreferCUDA==dci.ulCreationFlags) {
+//            cuvidCtxLockCreate(&cuvidLock_, cuCtx_);
+//            dci.vidLock = cuvidLock_;
+//        }
+
         // 1:1 aspect ratio conversion, depends on scaled resolution, ffmpeg/libavcodec/cuvid.c
         dci.target_rect.left   = dci.target_rect.top = 0;
         dci.target_rect.right  = (short) dci.ulTargetWidth;
@@ -749,10 +764,9 @@ public:
             cuvidDestroyDecoder(cuvidDecoder_);
             cuvidDecoder_ = NULL;
         }
-        if (cuCtx_) {
-            cuCtxDestroy(cuCtx_);
-            cuCtx_ = NULL;
-        }
+
+        cuCtx_ = NULL;
+
         if (hostPtr_) {
             cuMemFreeHost(hostPtr_);
             hostPtr_ = NULL;
@@ -765,139 +779,137 @@ public:
     // identity
     char const* Name() const { return "NVDEC (GPU)"; }
 
-    bool Init(int cuda_device_idx, AVStream const* stream, int width, int height) {
+    bool Init(CUcontext cuCtx, AVStream const* stream, int width, int height) {
         assert(NULL==cuCtx_ && stream && stream->codecpar && stream->codecpar->codec_id==CodecID());
         assert(width && height && 0==(1&width) && 0==(1&height));// target width/height must be multiple of 2
         Destroy();
 
+        if (NULL==cuCtx || NULL==stream || NULL==stream->codecpar || 0!=(1&width) || 0!=(1&height)) {
+            return false;
+        }
+
+        AVCodecContext* avctx = stream->codec;
         AVCodecParameters* codecpar = stream->codecpar;
-        cudaVideoCodec const nvCodec = getCuvidCodec(codecpar->codec_id);
-        CUdevice cuDevice = 0;
-        if (nvCodec<cudaVideoCodec_NumCodecs &&
-            CUDA_SUCCESS==cuDeviceGet(&cuDevice, cuda_device_idx) &&
-            CUDA_SUCCESS==cuCtxCreate(&cuCtx_, CU_CTX_SCHED_BLOCKING_SYNC, cuDevice)) {
+        cudaVideoCodec const codecType = getCuvidCodec(codecpar->codec_id);
+        if (codecType>=cudaVideoCodec_NumCodecs) {
+            return false;
+        }
+
+        // setup H264/HEVC bit stream filter and sequence header data
+        char const* bsf_name = NULL;
+        if (cudaVideoCodec_H264==codecType) {
+            bsf_name = "h264_mp4toannexb";
+        }
+        else if (cudaVideoCodec_HEVC==codecType) {
+            bsf_name = "hevc_mp4toannexb";
+        }
+        else {
             //
-            // confirm again! note cuvidGetDecoderCaps() may lie.
-            // it makes us to create CUvideodecoder here!
-            // (to supprt hevc, you'll need Maxwell(GM206) or Pascal GP10x)
-            //   GTX 1080Ti/Titan X/Titan Xp = GP102
-            //   GTX 1070/1080               = GP104
-            //   GTX 1060                    = GP106
-            //   GTX 1050                    = GP107
-            //   GTX 1030                    = GP108
+            // more...?
             //
-            //   GTX 950/960                 = GM206 (max size=4096x2304)
-            //
-            CUVIDDECODECAPS cap;
-            memset(&cap, 0, sizeof(CUVIDDECODECAPS));
-            cap.eCodecType      = nvCodec;
-            cap.eChromaFormat   = cudaVideoChromaFormat_420;
-            cap.nBitDepthMinus8 = 0;
-            if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported &&
-                (int)cap.nMinWidth<=codecpar->width && codecpar->width<=(int)cap.nMaxWidth && 
-                (int)cap.nMinHeight<=codecpar->height && codecpar->height<=(int)cap.nMaxHeight) {
-                // setup H264/HEVC bit stream filter and sequence header data
-                char const* bsf_name = NULL;
-                if (cudaVideoCodec_H264==nvCodec) {
-                    bsf_name = "h264_mp4toannexb";
-                }
-                else if (cudaVideoCodec_HEVC==nvCodec) {
-                    bsf_name = "hevc_mp4toannexb";
-                }
-                else {
-                    //
-                    // more...?
-                    //
-                    AVBitStreamFilter* bsf = NULL;
-                    while (NULL!=(bsf=av_bitstream_filter_next(bsf))) {
-                        for (AVCodecID const* codec_id=bsf->codec_ids; codec_id && AV_CODEC_ID_NONE!=*codec_id; ++codec_id) {
-                            if (codecpar->codec_id==*codec_id && AVMEDIA_TYPE_VIDEO==avcodec_get_type(*codec_id)) {
-                                BL_LOG("** bit stream filter - name:%s codec:%s???\n", bsf->name, avcodec_get_name(*codec_id));
-                            }
-                        }
+            AVBitStreamFilter* bsf = NULL;
+            while (NULL!=(bsf=av_bitstream_filter_next(bsf))) {
+                for (AVCodecID const* codec_id=bsf->codec_ids; codec_id && AV_CODEC_ID_NONE!=*codec_id; ++codec_id) {
+                    if (codecpar->codec_id==*codec_id && AVMEDIA_TYPE_VIDEO==avcodec_get_type(*codec_id)) {
+                        BL_LOG("** bit stream filter - name:%s codec:%s???\n", bsf->name, avcodec_get_name(*codec_id));
                     }
                 }
+            }
+        }
 
-                if (NULL!=bsf_name) {
-                    AVBitStreamFilter const* bsf = av_bsf_get_by_name(bsf_name);
-                    if (NULL==bsf || 0!=av_bsf_alloc(bsf, &bsfCtx_) ||
-                        0!=avcodec_parameters_copy(bsfCtx_->par_in, codecpar) ||
-                        0!=av_bsf_init(bsfCtx_)) {
-                        if (bsfCtx_) {
-                            av_bsf_free(&bsfCtx_);
-                            bsfCtx_ = NULL;
-                        }
-                        BL_LOG("** CUVIDDecoder::Init() - Failed to init AVBSFContext\n");
-                        return false;
-                    }
+        if (NULL!=bsf_name) {
+            AVBitStreamFilter const* bsf = av_bsf_get_by_name(bsf_name);
+            if (NULL==bsf || 0!=av_bsf_alloc(bsf, &bsfCtx_) ||
+                0!=avcodec_parameters_copy(bsfCtx_->par_in, codecpar) ||
+                0!=av_bsf_init(bsfCtx_)) {
+                if (bsfCtx_) {
+                    av_bsf_free(&bsfCtx_);
+                    bsfCtx_ = NULL;
+                }
+                BL_LOG("** CUVIDDecoder::Init() - Failed to init AVBSFContext\n");
+                return false;
+            }
 
-                    if (bsfCtx_->par_out->extradata_size<sizeof(cuvidFmt_.raw_seqhdr_data)) {
-                        cuvidFmt_.format.seqhdr_data_length = bsfCtx_->par_out->extradata_size;
-                    }
-                    else { // error!?
-                        cuvidFmt_.format.seqhdr_data_length = sizeof(cuvidFmt_.raw_seqhdr_data);
-                    }
-                    memcpy(cuvidFmt_.raw_seqhdr_data,
-                           bsfCtx_->par_out->extradata,
-                           cuvidFmt_.format.seqhdr_data_length);
-                }
-                else if (codecpar->extradata_size>0 && codecpar->extradata) {
-                    if (codecpar->extradata_size<sizeof(cuvidFmt_.raw_seqhdr_data)) {
-                        cuvidFmt_.format.seqhdr_data_length = codecpar->extradata_size;
-                    }
-                    else { // error!?
-                        cuvidFmt_.format.seqhdr_data_length = sizeof(cuvidFmt_.raw_seqhdr_data);
-                    }
-                    memcpy(cuvidFmt_.raw_seqhdr_data,
-                           codecpar->extradata,
-                           cuvidFmt_.format.seqhdr_data_length);
-                }
+            if (bsfCtx_->par_out->extradata_size<sizeof(cuvidFmt_.raw_seqhdr_data)) {
+                cuvidFmt_.format.seqhdr_data_length = bsfCtx_->par_out->extradata_size;
+            }
+            else { // error!?
+                cuvidFmt_.format.seqhdr_data_length = sizeof(cuvidFmt_.raw_seqhdr_data);
+            }
+            memcpy(cuvidFmt_.raw_seqhdr_data, bsfCtx_->par_out->extradata, cuvidFmt_.format.seqhdr_data_length);
+        }
+        else if (codecpar->extradata_size>0 && codecpar->extradata) {
+            if (codecpar->extradata_size<sizeof(cuvidFmt_.raw_seqhdr_data)) {
+                cuvidFmt_.format.seqhdr_data_length = codecpar->extradata_size;
+            }
+            else { // error!?
+                cuvidFmt_.format.seqhdr_data_length = sizeof(cuvidFmt_.raw_seqhdr_data);
+            }
+            memcpy(cuvidFmt_.raw_seqhdr_data, codecpar->extradata, cuvidFmt_.format.seqhdr_data_length);
+        }
 
-                // # of max decoding surfaces, FFmpeg simply take 25(!?)
-                numSurfaces_ = cuvidGetNumSurfaces(nvCodec, codecpar->width, codecpar->height);
-                if (numSurfaces_>MAX_CUVID_PARSED_FRAMES)
-                    numSurfaces_ = MAX_CUVID_PARSED_FRAMES;
+        if (CUDA_SUCCESS==cuCtxPushCurrent(cuCtx)) {
+            int const coded_width  = avctx->coded_width;
+            int const coded_height = avctx->coded_height;
 
-                // decoder create info struct
-                CUVIDDECODECREATEINFO dci;
-                memset(&dci, 0, sizeof(CUVIDDECODECREATEINFO));
-                dci.ulWidth             = codecpar->width;
-                dci.ulHeight            = codecpar->height;
-                dci.ulNumDecodeSurfaces = numSurfaces_; // FFmpeg set to 25
-                dci.CodecType           = nvCodec;
-              //dci.ChromaFormat        = cuvidFmt_.format.chroma_format;
-                dci.ChromaFormat        = cudaVideoChromaFormat_420;
-                if (cudaVideoCodec_JPEG==dci.CodecType) {
-                    dci.ulCreationFlags = cudaVideoCreate_PreferCUDA;
-                }
-                else {
-                    dci.ulCreationFlags = cudaVideoCreate_PreferCUVID;
-                }
-                dci.bitDepthMinus8      = 0;
-                dci.ulIntraDecodeOnly   = 0;
-                dci.display_area.left   = dci.display_area.top  = 0;
-                dci.display_area.right  = (short) dci.ulWidth;
-                dci.display_area.bottom = (short) dci.ulHeight;
-                dci.OutputFormat        = cudaVideoSurfaceFormat_NV12;
-                dci.DeinterlaceMode     = cudaVideoDeinterlaceMode_Weave;
-                if (AV_FIELD_PROGRESSIVE==codecpar->field_order) {
-                    // cudaVideoDeinterlaceMode_Adaptive needs more video memory than other DImodes.
-                    dci.DeinterlaceMode = cudaVideoDeinterlaceMode_Adaptive;
-                }
-                dci.ulTargetWidth       = width;
-                dci.ulTargetHeight      = height;
-                dci.ulNumOutputSurfaces = 1; // ffmpeg/libavcodec/cuvid.c
-                dci.vidLock             = NULL; // FFmpeg doesn't use this
-                // 1:1 aspect ratio conversion, depends on scaled resolution, ffmpeg/libavcodec/cuvid.c
-                dci.target_rect.left    = dci.target_rect.top = 0;
-                dci.target_rect.right   = (short) dci.ulTargetWidth;
-                dci.target_rect.bottom  = (short) dci.ulTargetHeight;
+            // #(surfaces)
+            numSurfaces_ = cuvidGetNumSurfaces(codecType, coded_width, coded_height);
+            if (numSurfaces_>MAX_CUVID_PARSED_FRAMES)
+                numSurfaces_ = MAX_CUVID_PARSED_FRAMES;
 
-                //
+            // target size
+            width_ = width;
+            height_ = height;
+
+            // build format
+            CUVIDEOFORMAT fmt;
+            memset(&fmt, 0, sizeof(fmt));
+            fmt.codec                   = codecType;
+            fmt.frame_rate.numerator    = stream->avg_frame_rate.num;
+            fmt.frame_rate.denominator  = stream->avg_frame_rate.den;
+            fmt.progressive_sequence    = (AV_FIELD_PROGRESSIVE==codecpar->field_order) || (AV_FIELD_UNKNOWN==codecpar->field_order);
+            fmt.bit_depth_luma_minus8   = 0;
+            switch (avctx->pix_fmt)
+            {
+            // planar YUV 4:2:0, 15bpp, (1 Cr & Cb sample per 2x2 Y samples)
+            case AV_PIX_FMT_YUV420P10BE: // big-endian
+            case AV_PIX_FMT_YUV420P10LE: // little-endian
+                fmt.bit_depth_luma_minus8 = 2; // 10 bits
+                break;
+
+            // planar YUV 4:2:0, 18bpp, (1 Cr & Cb sample per 2x2 Y samples)
+            case AV_PIX_FMT_YUV420P12BE: // big-endian
+            case AV_PIX_FMT_YUV420P12LE: // little-endian
+                fmt.bit_depth_luma_minus8 = 4; // 12 bits
+                break;
+
+            default:
+                break;
+            }
+            fmt.bit_depth_chroma_minus8 = fmt.bit_depth_luma_minus8;
+            fmt.coded_width             = coded_width;
+            fmt.coded_height            = coded_height;
+            fmt.display_area.left       = 0;
+            fmt.display_area.top        = 0;
+            fmt.display_area.right      = codecpar->width;
+            fmt.display_area.bottom     = codecpar->height;
+            fmt.chroma_format           = cudaVideoChromaFormat_420;
+            fmt.bitrate                 = 0; // video bitrate (bps, 0=unknown)
+            fmt.display_aspect_ratio.x  = codecpar->width;
+            fmt.display_aspect_ratio.y  = codecpar->height;
+            // fmt.video_signal_description to be determined
+            //fmt.video_signal_description.video_format           = 0; // bitfield[3]
+            //fmt.video_signal_description.video_full_range_flag  = 0; // bitfield[1]
+            //fmt.video_signal_description.reserved_zero_bits     = 0; // bitfield[4]
+            //fmt.video_signal_description.color_primaries          = (unsigned char) avctx->color_primaries;
+            //fmt.video_signal_description.transfer_characteristics = (unsigned char) avctx->color_trc;
+            //fmt.video_signal_description.matrix_coefficients      = (unsigned char) avctx->colorspace;
+
+            if (CreateDecoder_(&fmt)) {
                 // cuvid parser params struct
                 CUVIDPARSERPARAMS pps;
                 memset(&pps, 0, sizeof(pps));
-                pps.CodecType              = nvCodec;
+                pps.CodecType              = codecType;
                 pps.ulMaxNumDecodeSurfaces = numSurfaces_;
 
                 // Timestamp units in Hz (0=default=10000000Hz) 
@@ -915,81 +927,67 @@ public:
                 pps.pfnDecodePicture    = sPictureDecodeCallback_;
                 pps.pfnDisplayPicture   = sPictureDisplayCallback_;
                 pps.pExtVideoInfo       = &cuvidFmt_; // [Optional] sequence header data from system layer
+                int err = cuvidCreateVideoParser(&cuvidParser_, &pps);
+                if (CUDA_SUCCESS==err && NULL!=cuvidParser_) {
+                    // first packet?
+                    if (cuvidFmt_.format.seqhdr_data_length>0) {
+                        CUVIDSOURCEDATAPACKET cupkt;
+                        cupkt.flags = 0;
+                        cupkt.payload_size = cuvidFmt_.format.seqhdr_data_length;
+                        cupkt.payload = cuvidFmt_.raw_seqhdr_data;
+                        cupkt.timestamp = 0;
+                        err = cuvidParseVideoData(cuvidParser_, &cupkt);
+                        if (CUDA_SUCCESS!=err) {
+                            BL_LOG("** CUVIDDecoder::Init() - failed to parse header data(%d)\n", err);
+                            cuvidDestroyVideoParser(cuvidParser_);
+                            cuvidParser_ = NULL;
+                        }
+                    }
 
-                // create cuvid decoder, most likely to fail
-                int err = cuvidCreateDecoder(&cuvidDecoder_, &dci);
-                if (CUDA_SUCCESS==err && NULL!=cuvidDecoder_) {
-                    err = cuvidCreateVideoParser(&cuvidParser_, &pps);
-                    if (CUDA_SUCCESS==err && NULL!=cuvidParser_) {
-                        // first packet?
-                        if (cuvidFmt_.format.seqhdr_data_length>0) {
-                            CUVIDSOURCEDATAPACKET cupkt;
-                            cupkt.flags = 0;
-                            cupkt.payload_size = cuvidFmt_.format.seqhdr_data_length;
-                            cupkt.payload = cuvidFmt_.raw_seqhdr_data;
-                            cupkt.timestamp = 0;
-                            err = cuvidParseVideoData(cuvidParser_, &cupkt);
-                            if (CUDA_SUCCESS!=err) {
-                                BL_LOG("** CUVIDDecoder::Init() - failed to parse header data(%d)\n", err);
+                    ////////////////////////////////////////////
+                    // host memory... should be removed soon...
+                    ////////////////////////////////////////////
+                    if (NULL!=cuvidParser_) {
+                        // alloc memory (1KB boundary)
+                        // width=640  -> pitch=1024
+                        // width=1280 -> pitch=1536
+                        // width=2304 -> pitch=2560
+                        // boundary could be 256 or 512
+                        int const pitch = (width+1023)&~1023;
+                        int const size  = pitch*(height + height/2);
+                        if (NULL==hostPtr_ || hostPtrSize_<size) {
+                            if (NULL!=hostPtr_) {
+                                cuMemFreeHost(hostPtr_);
+                            }
+                            hostPtr_ = NULL;
+                            hostPtrSize_ = 0;
+                            if (CUDA_SUCCESS==cuMemAllocHost(&hostPtr_, size)) {
+                                hostPtrSize_ = size;
+                            }
+                            else {
                                 cuvidDestroyVideoParser(cuvidParser_);
                                 cuvidParser_ = NULL;
                             }
                         }
+                    }
 
-                        if (NULL!=cuvidParser_) {
-                            // save format
-                            CUVIDEOFORMAT& format = cuvidFmt_.format;
-                            format.codec                   = nvCodec;
-                            format.frame_rate.numerator    = stream->avg_frame_rate.num;
-                            format.frame_rate.denominator  = stream->avg_frame_rate.den;
-                            format.progressive_sequence    = (dci.DeinterlaceMode==cudaVideoDeinterlaceMode_Weave);
-                            format.bit_depth_luma_minus8   = 0; // high bit depth luma. E.g, 2 for 10-bitdepth, 4 for 12-bitdepth
-                            format.bit_depth_chroma_minus8 = 0; // high bit depth chroma. E.g, 2 for 10-bitdepth, 4 for 12-bitdepth
-                            format.reserved1               = 0;
-                            format.display_area.left       = format.display_area.top = 0;
-                            format.coded_width             = format.display_area.right = dci.ulWidth;
-                            format.coded_height            = format.display_area.bottom = dci.ulHeight;
-                            format.chroma_format           = dci.ChromaFormat;
-                            format.bitrate                 = 0; // unknown
-                            format.display_aspect_ratio.x  = 0; // TBD
-                            format.display_aspect_ratio.y  = 0; // TBD
-                            memset(&format.video_signal_description, 0, sizeof(format.video_signal_description)); // TBD
-                            width_  = width;
-                            height_ = height;
-
-                            //
-                            // alloc memory (1KB boundary)
-                            // width=640  -> pitch=1024
-                            // width=1280 -> pitch=1536
-                            // width=2304 -> pitch=2560
-                            // boundary could be 256 or 512
-                            int const pitch = (width+1023)&~1023;
-                            int const size  = pitch*(height + height/2);
-                            if (NULL==hostPtr_ || hostPtrSize_<size) {
-                                if (NULL!=hostPtr_) {
-                                    cuMemFreeHost(hostPtr_);
-                                }
-                                hostPtr_ = NULL;
-                                hostPtrSize_ = 0;
-                                if (CUDA_SUCCESS==cuMemAllocHost(&hostPtr_, size)) {
-                                    hostPtrSize_ = size;
-                                }
-                            }
-
-                            if (NULL!=hostPtr_) {
-                                CUcontext dummy = NULL;
-                                cuCtxPopCurrent(&dummy);
-                                return true;
-                            }
-                        }
+                    if (NULL!=cuvidParser_) {
+                        cuCtx_ = cuCtx; // final succeed
                     }
                     else {
-                        BL_LOG("** CUVIDDecoder::Init() - failed to create cuvid parser(%d)\n", err);
+                        cuvidDestroyDecoder(cuvidDecoder_);
+                        cuvidDecoder_ = NULL;
                     }
                 }
                 else {
-                    BL_LOG("** CUVIDDecoder::Init() - failed to create cuvid decoder(%d)\n", err);
+                    BL_LOG("** CUVIDDecoder::Init() - failed to create cuvid parser(%d)\n", err);
                 }
+            }
+
+            cuCtxPopCurrent(NULL);
+
+            if (NULL!=cuCtx_) {
+                return true;
             }
         }
 
@@ -1029,7 +1027,6 @@ public:
                     return; // failed!?
                 }
             }
-
 #if 0
             //
             // to send a discontinuity packet does not work!
@@ -1185,401 +1182,350 @@ public:
 };
 
 //---------------------------------------------------------------------------------------
-FFmpegHWAccelInitializer::FFmpegHWAccelInitializer():
-mutex_(),
-availableFFmpegAVHWDevices_(0),
-cuvidDeviceIndex_(-1),
-amfInit_(0),
-activeDecoders_(0),totalDecoders_(0),
-prefer_decoder_(0)
-{
-    memset(cuvidDecoderCap_, 0, sizeof(cuvidDecoderCap_));
-    for (int i=0; i<MAX_FFMPEG_HWACCELS_SUPPORTS; ++i) {
-        hwAccels_[i] = AV_HWDEVICE_TYPE_NONE;
-    }
-
-    // nvidia cuvid
-    int cuda_device_count = 0;
-    if (CUDA_SUCCESS==cuInit(0, __CUDA_API_VERSION, NULL) && CUDA_SUCCESS==cuvidInit(0) &&
-        NULL!=cuDeviceGetCount && CUDA_SUCCESS==cuDeviceGetCount(&cuda_device_count) && cuda_device_count>0) {
-        // decoder create info struct
-        CUVIDDECODECREATEINFO dci;
-        memset(&dci, 0, sizeof(CUVIDDECODECREATEINFO));
-        dci.ulWidth             = 0; // TBD
-        dci.ulHeight            = 0; // TBD
-        dci.ulNumDecodeSurfaces = 0; // TBD
-        dci.CodecType           = cudaVideoCodec_H264; // TBD
-        dci.ChromaFormat        = cudaVideoChromaFormat_420;
-        dci.ulCreationFlags     = cudaVideoCreate_PreferCUVID;
-        dci.bitDepthMinus8      = 0;
-        dci.ulIntraDecodeOnly   = 0;
-        dci.display_area.left   = dci.display_area.top  = 0;
-        dci.display_area.right  = 0; // TBD (short) dci.ulWidth;
-        dci.display_area.bottom = 0; // TBD (short) dci.ulHeight;
-        dci.OutputFormat        = cudaVideoSurfaceFormat_NV12;
-        dci.DeinterlaceMode     = cudaVideoDeinterlaceMode_Weave;
-        dci.DeinterlaceMode     = cudaVideoDeinterlaceMode_Adaptive;
-        dci.ulTargetWidth       = 0; // TBD width;
-        dci.ulTargetHeight      = 0; // TBD height;
-        dci.ulNumOutputSurfaces = 1; // ffmpeg/libavcodec/cuvid.c
-        dci.vidLock             = NULL; // FFmpeg doesn't use this
-        dci.target_rect.left    = dci.target_rect.top = 0;
-        dci.target_rect.right   = 0; // TBD (short) dci.ulTargetWidth;
-        dci.target_rect.bottom  = 0; // TBD (short) dci.ulTargetHeight;
-
-        CUdevice cuda_device = 0;
-        int major(0), minor(0); // A GPU with a minimum compute capability of SM 1.1 or higher is required
-        char const* codec[cudaVideoCodec_NumCodecs] = {
-            "MPEG1   ", "MPEG2   ", "MPEG4   ", "VC1     ", "H264    ",
-            "JPEG    ", "H264-SVC", "H264-MVC", "HEVC    ", "VP8     ",
-            "VP9     ",
-        };
-
-        for (int i=0; i<cuda_device_count; ++i) {
-            CUcontext cuda_ctx = NULL;
-            if (CUDA_SUCCESS==cuDeviceGet(&cuda_device, i) &&
-                CUDA_SUCCESS==cuDeviceComputeCapability(&major, &minor, cuda_device) &&
-                (major>1 || (1==major && minor>=1)) &&
-                CUDA_SUCCESS==cuCtxCreate(&cuda_ctx, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device)) {
-
-                int total_support_codec = 0;
-                memset(cuvidDecoderCap_, 0, sizeof(cuvidDecoderCap_));
-
-                CUVIDDECODECAPS cap;
-                memset(&cap, 0, sizeof(cap));
-                cap.eChromaFormat   = cudaVideoChromaFormat_420;
-                cap.nBitDepthMinus8 = 0; // 2 for 10-bit, 4 for 12-bit
-                for (int j=0; j<cudaVideoCodec_NumCodecs; ++j) {
-                    cap.eCodecType = (cudaVideoCodec) j;
-                    if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported) {
-                        // cuvidGetDecoderCaps() may lie, try it...
-                        dci.ulWidth             = cap.nMaxWidth;
-                        dci.ulHeight            = cap.nMaxHeight;
-                        dci.ulNumDecodeSurfaces = cuvidGetNumSurfaces(cap.eCodecType, cap.nMaxWidth, cap.nMaxHeight);
-                        dci.CodecType           = cap.eCodecType;
-                        dci.ChromaFormat        = cap.eChromaFormat;
-                        dci.ulCreationFlags     = (cudaVideoCodec_JPEG==dci.CodecType) ? cudaVideoCreate_PreferCUDA:cudaVideoCreate_PreferCUVID;
-                        dci.bitDepthMinus8      = cap.nBitDepthMinus8;
-                        dci.display_area.right  = (short) cap.nMaxWidth;
-                        dci.display_area.bottom = (short) cap.nMaxHeight;
-                        dci.ulTargetWidth       = cap.nMaxWidth;
-                        dci.ulTargetHeight      = cap.nMaxHeight;
-                        dci.target_rect.right   = (short) cap.nMaxWidth;
-                        dci.target_rect.bottom  = (short) cap.nMaxHeight;
-                        CUvideodecoder cuvidDecoder = nullptr;
-                        if (CUDA_SUCCESS==cuvidCreateDecoder(&cuvidDecoder, &dci) && cuvidDecoder) {
-                            MinMaxSize& mm = cuvidDecoderCap_[j];
-                            mm.MaxWidth  = cap.nMaxWidth;
-                            mm.MaxHeight = cap.nMaxHeight;
-                            mm.MinWidth  = cap.nMinWidth;
-                            mm.MinHeight = cap.nMinHeight;
-
-                            cuvidDestroyDecoder(cuvidDecoder);
-                            ++total_support_codec;
-                        }
-                        else {
-                            BL_LOG("** cuvidGetDecoderCaps() lied! %s not support!!!\n", codec[j]);
-                        }
-                    }
-                }
-                cuCtxDestroy(cuda_ctx);
-
-                if (total_support_codec>0) {
-                    cuvidDeviceIndex_ = i;
-                    break;
-                }
-            }
-        }
-
-        if (0<=cuvidDeviceIndex_) {
-#ifdef BL_AVDECODER_VERBOSE
-            char cuda_device_name[256];
-            int driver_ver = 0;
-            cuDeviceGetName(cuda_device_name, sizeof(cuda_device_name), cuda_device);
-            cuDeviceComputeCapability(&major, &minor, cuda_device);
-            cuDriverGetVersion(&driver_ver);
-            BL_LOG("** Hardware info(#%d) : nVidia CUVID | %s | ver.%d.%d | driver:%d\n",
-                   cuvidDeviceIndex_, cuda_device_name, major, minor, driver_ver);
-            for (int j=0; j<cudaVideoCodec_NumCodecs; ++j) {
-                MinMaxSize& mm = cuvidDecoderCap_[j];
-                if (mm.MinWidth<mm.MaxWidth && mm.MinHeight<mm.MaxHeight) {
-                    BL_LOG("    %s %dx%d  %dx%d\n", codec[j],
-                           mm.MinWidth, mm.MinHeight, mm.MaxWidth, mm.MaxHeight);
-                }
-            }
-#endif
-        }
-    }
-
-    // AMD AMF
-    if (AMF_OK==g_AMFFactory.Init()) {
-        amf::AMFContextPtr amf_ctx;
-        if (AMF_OK==g_AMFFactory.GetFactory()->CreateContext(&amf_ctx) && amf_ctx) {
-           // try create amf decoder - must communicate with gpu to see if it's really there.
-           // (the user may just get a new NVIDIA GPU)
-           amf::AMFComponentPtr decoder;
-           if (AMF_OK==amf_ctx->InitDX9(NULL) &&
-               AMF_OK==g_AMFFactory.GetFactory()->CreateComponent(amf_ctx, AMFVideoDecoderUVD_H264_AVC, &decoder)) {
-               if (AMF_OK==decoder->Init(amf::AMF_SURFACE_NV12, 3840, 2160)) {
-                   amfInit_ = 1;
-               }
-               decoder->Terminate();
-               decoder = NULL;
-           }
-           amf_ctx->Terminate();
-           amf_ctx = NULL;
-        }
-
-        if (0==amfInit_) {
-#ifdef BL_AVDECODER_VERBOSE
-            BL_LOG("AMF Failed to initialize\n");
-#endif
-            g_AMFFactory.Terminate();
-        }
-    }
-
-    // i am not pretty sure about AMF, you?
-//    if (0<=cuvidDeviceIndex_ || amfInit_) {
-    if (0<=cuvidDeviceIndex_) {
-        prefer_decoder_ = 1;
-    }
-}
-//---------------------------------------------------------------------------------------
-FFmpegHWAccelInitializer::~FFmpegHWAccelInitializer()
-{
-    assert(0==activeDecoders_);
-
-    if (0<=cuvidDeviceIndex_) {
-        //
-        // no cuDeInit(0, __CUDA_API_VERSION, NULL) && CUDA_SUCCESS==cuvidDeInit(0) ?
-        //
-        cuvidDeviceIndex_ = -1;
-    }
-
-    if (amfInit_) {
-        g_AMFFactory.Terminate();
-        amfInit_ = 0;
-    }
-}
-//---------------------------------------------------------------------------------------
-int FFmpegHWAccelInitializer::AddReferenceCount()
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (1==++totalDecoders_) {
-        // Initialize FFmpeg - register all AVCodecs and HWAccels...
-        av_register_all();
-
-        // check HW devices
-        availableFFmpegAVHWDevices_ = 0;
-#ifdef ENABLE_FFMPEG_HARDWARE_ACCELERATED_DECODER
-        AVHWDeviceType type = AV_HWDEVICE_TYPE_NONE;
-        AVBufferRef* hw_device_ctx = NULL;
-        while (availableFFmpegAVHWDevices_<MAX_FFMPEG_HWACCELS_SUPPORTS &&
-               AV_HWDEVICE_TYPE_NONE!=(type=av_hwdevice_iterate_types(type))) {
-            if (av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0)>=0) {
-                hwAccels_[availableFFmpegAVHWDevices_++] = type;
-                av_buffer_unref(&hw_device_ctx);
-            }
-        }
-#endif
-
-#ifdef BL_AVDECODER_VERBOSE
-        BL_LOG("**\n** FFmpeg version : %X(%s)\n", avcodec_version(), av_version_info());
-        BL_LOG("** License : %s\n", avutil_license());
-        BL_LOG("** Build config : %s\n", avutil_configuration());
-        if (availableFFmpegAVHWDevices_>0) {
-            BL_LOG("** HWAccel :");
-            for (int i=0; i<availableFFmpegAVHWDevices_; ++i) {
-                BL_LOG(" %s", av_hwdevice_get_type_name(hwAccels_[i]));
-            }
-            BL_LOG("\n**\n");
-        }
-#endif
-
-#if 0
-        AVCodec* codec = NULL;
-        while (NULL!=(codec = av_codec_next(codec))) {
-            if (AVMEDIA_TYPE_VIDEO==codec->type && av_codec_is_decoder(codec)) {
-                BL_LOG("AVCodec:%s | %s", codec->name, codec->long_name);
-                if (codec->pix_fmts) {
-                    BL_LOG(" | ");
-                    for (AVPixelFormat const* fmt=codec->pix_fmts; AV_PIX_FMT_NONE!=*fmt; ++fmt) {
-                        BL_LOG(" %s", av_get_pix_fmt_name(*fmt));
-                    }
-                }
-                BL_LOG("\n");
-            }
-        }
-
-        AVHWAccel* hwaccel = NULL;
-        while (NULL!=(hwaccel = av_hwaccel_next(hwaccel))) {
-            if (AVMEDIA_TYPE_VIDEO==hwaccel->type) {
-                BL_LOG("AVHWAccel:%s | %s(%d) | %s\n", hwaccel->name, av_get_pix_fmt_name(hwaccel->pix_fmt), hwaccel->pix_fmt, is_hwaccel_pix_fmt(hwaccel->pix_fmt)? "HW":"SW");
-            }
-        }
-#endif
-    }
-
-    if (1==++activeDecoders_) {
-        avformat_network_init();
-    }
-
-    return activeDecoders_;
-}
-
-//---------------------------------------------------------------------------------------
-void FFmpegHWAccelInitializer::RemoveReferenceCount()
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-    assert(activeDecoders_>0 && totalDecoders_>0);
-    if (--activeDecoders_<=0) {
-        avformat_network_deinit();
-        activeDecoders_ = 0;
-    }
-}
-//---------------------------------------------------------------------------------------
-bool FFmpegHWAccelInitializer::TogglePreferVideoDecoder(int options,
-                                                        AVStream const* /*stream*/,
-                                                        int /*width*/, int /*height*/)
-{
-    if (options>1) {
-        int pre_bak = prefer_decoder_;
-        if (0==prefer_decoder_) {
-            if (0<=cuvidDeviceIndex_) {
-                // TO-DO : check codec, width and height
-                prefer_decoder_ = 1;
-            }
-
-            if (0==prefer_decoder_ && amfInit_) {
-                // TO-DO : check codec, width and height
-                prefer_decoder_ = 1;
-            }
-
-            if (0==prefer_decoder_ && 0<availableFFmpegAVHWDevices_ && options>1) {
-                prefer_decoder_ = 2;
-            }
-        }
-        else if (0<availableFFmpegAVHWDevices_&&(prefer_decoder_+1)<options) {
-            if ((++prefer_decoder_)>=(availableFFmpegAVHWDevices_+2)) {
-                prefer_decoder_ = 0;
-            }
-        }
-        else {
-            prefer_decoder_ = 0;
-        }
-
-        return (pre_bak!=prefer_decoder_);
-    }
-    return false;
-}
-//---------------------------------------------------------------------------------------
-bool FFmpegHWAccelInitializer::FindVideoDecoder(DecoderConfig& dconfig, AVStream const* stream, int width, int height)
+VideoDecoderImp* VideoDecoderImp::New(AVStream const* stream, int width, int height)
 {
     if (NULL!=stream && NULL!=stream->codecpar && AVMEDIA_TYPE_VIDEO==stream->codecpar->codec_type) {
-        dconfig.ExtDecoder   = NULL;
-        dconfig.Codec        = NULL;
-        dconfig.HWDeviceType = AV_HWDEVICE_TYPE_NONE;
-        dconfig.Options      = 0;
-
         AVCodecParameters* codecpar = stream->codecpar;
         AVCodecID const codec_id = codecpar->codec_id;
 
-        // NVIDIA CUVID
-        if (0<=cuvidDeviceIndex_) {
-            cudaVideoCodec const cuvidCodec = getCuvidCodec(codec_id);
-            if (cuvidCodec<cudaVideoCodec_NumCodecs) {
-                MinMaxSize const& mm = cuvidDecoderCap_[cuvidCodec];
-                if (mm.MinWidth<=codecpar->width && codecpar->width<=mm.MaxWidth &&
-                    mm.MinHeight<=codecpar->height && codecpar->height<=mm.MaxHeight) {
-                    try {
-                        CUVIDDecoder* decoder = new CUVIDDecoder(codec_id);
-                        if (decoder->Init(cuvidDeviceIndex_, stream, width, height)) {
-                            dconfig.ExtDecoder = decoder;
-                        }
-                        else {
-                            delete decoder;
-                        }
-                    }
-                    catch (...) {
-                    }
-                }
-            }
-        }
+        std::lock_guard<std::mutex> lock(gpuCtx.mutex);
 
-        // AMD AMF SDK - can AMF resize?
-        if (NULL==dconfig.ExtDecoder && amfInit_ && width==codecpar->width && height==codecpar->height) {
-            if (NULL!=getAMFCodec(codec_id)) {
+        //
+        // (to supprt hevc, you'll need Maxwell(GM206) or Pascal GP10x)
+        //   GTX 1080Ti/Titan X/Titan Xp = GP102
+        //   GTX 1070/1080               = GP104
+        //   GTX 1060                    = GP106
+        //   GTX 1050                    = GP107
+        //   GTX 1030                    = GP108
+        //
+        //   GTX 950/960                 = GM206 (max size=4096x2304)
+        //
+
+        // cuvid
+        if (gpuCtx.cudaContext) {
+            cudaVideoCodec const nvCodec = getCuvidCodec(codec_id);
+
+            GPUContext::MaxSize const* max_sizes = NULL; gpuCtx.cuvidCaps8;
+            switch (stream->codec->pix_fmt)
+            {
+            // planar YUV 4:2:0, 15bpp, (1 Cr & Cb sample per 2x2 Y samples)
+            case AV_PIX_FMT_YUV420P10BE: // big-endian
+            case AV_PIX_FMT_YUV420P10LE: // little-endian
+                max_sizes = gpuCtx.cuvidCaps10; // 10 bits
+                break;
+
+            // planar YUV 4:2:0, 18bpp, (1 Cr & Cb sample per 2x2 Y samples)
+            case AV_PIX_FMT_YUV420P12BE: // big-endian
+            case AV_PIX_FMT_YUV420P12LE: // little-endian
+                max_sizes = gpuCtx.cuvidCaps12; // 12 bits
+                break;
+
+            case AV_PIX_FMT_YUV420P:
+            case AV_PIX_FMT_YUVJ420P: // full scale (JPEG)
+                max_sizes = gpuCtx.cuvidCaps8;
+                break;
+
+            default:
+                BL_LOG("cuvid format :%d\n", (int) stream->codec->pix_fmt);
+                break;
+            }
+
+            if (nvCodec<cudaVideoCodec_NumCodecs && NULL!=max_sizes &&
+                width<=max_sizes[nvCodec].Width &&
+                height<=max_sizes[nvCodec].Height) {
                 try {
-                    AMFDecoder* decoder = new AMFDecoder(codec_id, width, height);
-                    if (decoder->Init(codecpar)) {
-                        dconfig.ExtDecoder = decoder;
+                    CUVIDDecoder* decoder = new CUVIDDecoder(codec_id);
+                    if (decoder->Init(gpuCtx.cudaContext, stream, width, height)) {
+                        ++gpuCtx.activeDecoders;
+                        return decoder;
                     }
                     else {
                         delete decoder;
                     }
                 }
-                catch(...) {
+                catch (...) {
                 }
             }
         }
 
-        dconfig.Options = 1;
-        if (dconfig.ExtDecoder) {
-            ++dconfig.Options;
-            if (1!=prefer_decoder_) {
-                delete dconfig.ExtDecoder;
-                dconfig.ExtDecoder = NULL;
-            }
-        }
-
-        int const target_hw_decoder = prefer_decoder_ - 2;
-        for (int i=0; i<availableFFmpegAVHWDevices_; ++i) {
-            AVHWDeviceType const type = hwAccels_[i];
-            //
-            // Look for AVCodec first!
-            //
-            // refer libavcodec/allcodecs.c, register_all() for all possible codecs.
-            // eg, libavcodec/cuvid.c
-            //
-            AVCodec const* codec = NULL;
-            while (NULL!=(codec=av_codec_next(codec))) {
-                if (codec_id==codec->id && av_codec_is_decoder(codec) &&
-                    codec->pix_fmts && is_hwaccel_fmt_compatible(type, codec->pix_fmts[0])) {
-                    if (target_hw_decoder==i) {
-                        dconfig.Codec = codec;
-                        dconfig.HWDeviceType = type;
-                    }
-                    ++dconfig.Options;
-                    break;
-                }
-            }
-
-            if (NULL==codec) {
-                AVHWAccel* hwaccel = NULL;
-                while (NULL!=(hwaccel=av_hwaccel_next(hwaccel))) {
-                    if (codec_id==hwaccel->id && is_hwaccel_fmt_compatible(type, hwaccel->pix_fmt)) {
-                        if (target_hw_decoder==i) {
-                            dconfig.HWDeviceType = type;
+        // amd amf
+        if (gpuCtx.amfContext) {
+            // AMD AMF SDK - can AMF resize?
+            if (width==codecpar->width && height==codecpar->height) {
+                if (NULL!=getAMFCodec(codec_id)) {
+                    try {
+                        AMFDecoder* decoder = new AMFDecoder(codec_id, width, height);
+                        if (decoder->Init(gpuCtx.amfContext, codecpar)) {
+                            ++gpuCtx.activeDecoders;
+                            return decoder;
                         }
-                        ++dconfig.Options;
-                        break;
+                        else {
+                            delete decoder;
+                        }
+                    }
+                    catch(...) {
                     }
                 }
             }
         }
-
-        if (NULL!=dconfig.ExtDecoder) {
-            return true;
-        }
-
-        if (NULL==dconfig.Codec) {
-            dconfig.Codec = avcodec_find_decoder(codec_id);
-        }
-
-        return (NULL!=dconfig.Codec);
     }
 
-    return false;
+    return NULL;
+}
+//---------------------------------------------------------------------------------------
+void VideoDecoderImp::Delete(VideoDecoderImp* decoder)
+{
+    if (NULL!=decoder) {
+        std::lock_guard<std::mutex> lock(gpuCtx.mutex);
+        delete decoder;
+        --gpuCtx.activeDecoders;
+    }
 }
 
-}}}
+//---------------------------------------------------------------------------------------
+namespace hwaccel {
+
+int InitContext(void* /*device*/)
+{
+    std::lock_guard<std::mutex> lock(gpuCtx.mutex);
+    if (0==gpuCtx.init && 0==gpuCtx.activeDecoders) {
+
+        // CUDA and NVDECODE
+        assert(NULL==gpuCtx.cudaContext);
+        int cuda_device_count = 0;
+        if (CUDA_SUCCESS==cuInit(0, __CUDA_API_VERSION, NULL) && CUDA_SUCCESS==cuvidInit(0) &&
+            NULL!=cuDeviceGetCount && CUDA_SUCCESS==cuDeviceGetCount(&cuda_device_count) && cuda_device_count>0) {
+
+            //
+            // Note to make cuvidGetDecoderCaps() works, the cuda context must be created.
+            // But cuvidGetDecoderCaps() may be wrong!?
+            //
+
+            //
+            // Chroma format (cudaVideoChromaFormat)
+            // JPEG supports Monochrome, YUV 4:2:0, YUV 4:2:2 and YUV 4:4:4 chroma formats.
+            // H264, HEVC, VP9, VP8, VC1, MPEG1, MPEG2 and MPEG4 support YUV 4:2:0 chroma format only.
+            //
+
+            // best choice
+            int best_device_index = -1;
+            int best_major(0), best_minor(0);
+            int best_h264_size(0), best_hevc_size(0);
+
+            CUdevice cuda_device = 0;
+            CUVIDDECODECAPS cap;
+            memset(&cap, 0, sizeof(cap));
+            cap.eChromaFormat = cudaVideoChromaFormat_420;
+            cap.nBitDepthMinus8 = 0; // 2 for 10-bit, 4 for 12-bit
+            for (int i=0; i<cuda_device_count; ++i) {
+                int major(0), minor(0), bTCC(0);
+                int h264_max_size(0), hevc_max_size(0);
+                if (CUDA_SUCCESS==cuDeviceGet(&cuda_device, i) &&
+                    CUDA_SUCCESS==cuDeviceComputeCapability(&major, &minor, cuda_device) &&
+                    (major>1||(1==major && minor>=1)) &&
+                    CUDA_SUCCESS==cuDeviceGetAttribute(&bTCC, CU_DEVICE_ATTRIBUTE_TCC_DRIVER, cuda_device) && 0==bTCC) {
+                    CUcontext cudaCtx = NULL;
+                    if (CUDA_SUCCESS==cuCtxCreate(&cudaCtx, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device) && cudaCtx) {
+                        cap.eCodecType = cudaVideoCodec_H264;
+                        if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported) {
+                            h264_max_size = cap.nMaxWidth*cap.nMaxHeight; 
+                            cap.eCodecType = cudaVideoCodec_HEVC;
+                            if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported) {
+                                hevc_max_size = cap.nMaxWidth*cap.nMaxHeight;
+                            }
+
+                            // is this good?
+                            if (best_device_index<0) {
+                                best_device_index = i;
+                                best_major = major;
+                                best_minor = minor;
+                                best_h264_size = h264_max_size;
+                                best_hevc_size = hevc_max_size;
+                            }
+                            else if (best_hevc_size<hevc_max_size ||
+                                     (best_hevc_size==hevc_max_size && best_h264_size<h264_max_size)) {
+                                best_device_index = i;
+                                best_major = major;
+                                best_minor = minor;
+                                best_h264_size = h264_max_size;
+                                best_hevc_size = hevc_max_size;
+                            }
+                        }
+
+                        cuCtxDestroy(cudaCtx);
+                    }
+                }
+            }
+
+            // create best cuda context...
+            if (0<=best_device_index && CUDA_SUCCESS==cuDeviceGet(&cuda_device, best_device_index) &&
+#if INIT_CUDA_GL
+                CUDA_SUCCESS==cuGLCtxCreate(&gpuCtx.cudaContext, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device) && gpuCtx.cudaContext) {
+#else
+#if INIT_CUDA_D3D9
+                CUDA_SUCCESS==cuD3D9CtxCreate(&gpuCtx.cudaContext, &cuda_device, CU_CTX_SCHED_BLOCKING_SYNC, (IDirect3DDevice9*) device) && gpuCtx.cudaContext) {
+#else
+#if INIT_CUDA_D3D11
+                CUDA_SUCCESS==cuD3D11CtxCreate(&gpuCtx.cudaContext, &cuda_device, CU_CTX_SCHED_BLOCKING_SYNC, (ID3D11Device*) device) && gpuCtx.cudaContext) {
+#else
+                CUDA_SUCCESS==cuCtxCreate(&gpuCtx.cudaContext, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device) && gpuCtx.cudaContext) {
+#endif
+#endif
+#endif
+
+#ifdef BL_AVDECODER_VERBOSE
+                char cuda_device_name[256];
+                int driver_ver(0), major(0), minor(0);
+                cuDeviceGetName(cuda_device_name, sizeof(cuda_device_name), cuda_device);
+                cuDeviceComputeCapability(&major, &minor, cuda_device);
+                cuDriverGetVersion(&driver_ver);
+                BL_LOG("** Hardware info(#%d) : nVidia CUVID | %s | ver.%d.%d | driver:%d\n",
+                       best_device_index, cuda_device_name, major, minor, driver_ver);
+                char const* codec[cudaVideoCodec_NumCodecs] = {
+                    "MPEG1   ", "MPEG2   ", "MPEG4   ", "VC1     ", "H264    ",
+                    "JPEG    ", "H264-SVC", "H264-MVC", "HEVC    ", "VP8     ",
+                    "VP9     ",
+                };
+#endif
+                //
+                // build a quick table
+                CUVIDDECODECREATEINFO dci;
+                memset(&dci, 0, sizeof(CUVIDDECODECREATEINFO));
+                memset(&cap, 0, sizeof(cap));
+
+                // 0 for 8-bit, 2 for 10-bit, 4 for 12-bit
+                unsigned int const bit_depth_minus_8[3] = { 0, 2, 4 };
+                for (int i=0; i<cudaVideoCodec_NumCodecs; ++i) {
+                    GPUContext::MaxSize* max_sizes[3] = {
+                        gpuCtx.cuvidCaps8 + i,
+                        gpuCtx.cuvidCaps10 + i,
+                        gpuCtx.cuvidCaps12 + i
+                    };
+
+                    cap.eCodecType = (cudaVideoCodec) i;
+                    cap.eChromaFormat = cudaVideoChromaFormat_420;
+                    for (int j=0; j<sizeof(bit_depth_minus_8)/sizeof(bit_depth_minus_8[0]); ++j) {
+                        cap.nBitDepthMinus8 = bit_depth_minus_8[j];
+                        GPUContext::MaxSize* max_size = max_sizes[j];
+                        max_size->Width = max_size->Height = 0;
+                        if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported) {
+                            // confirm again! note cuvidGetDecoderCaps() may lie.
+                            // it makes us to create CUvideodecoder here!
+                            dci.ulWidth             = cap.nMaxWidth;
+                            dci.ulHeight            = cap.nMaxHeight;
+                            dci.ulNumDecodeSurfaces = cuvidGetNumSurfaces(cap.eCodecType, cap.nMaxWidth, cap.nMaxHeight);
+                            dci.CodecType           = cap.eCodecType;
+                            dci.ChromaFormat        = cap.eChromaFormat; // cudaVideoChromaFormat_420
+                            dci.ulCreationFlags     = cudaVideoCreate_PreferCUVID;
+                            //if (cudaVideoCodec_JPEG==dci.CodecType)
+                            //    dci.ulCreationFlags = cudaVideoCreate_PreferCUDA;
+                            dci.bitDepthMinus8      = cap.nBitDepthMinus8;
+                            dci.ulIntraDecodeOnly   = 0;
+                            dci.display_area.left   = dci.display_area.top = 0;
+                            dci.display_area.right  = (short) cap.nMaxWidth;
+                            dci.display_area.bottom = (short) cap.nMaxHeight;
+                            dci.OutputFormat        = cudaVideoSurfaceFormat_NV12;
+#ifdef CUVID_ENABLE_HDR_OUTPUT
+                            if (cap.nBitDepthMinus8)
+                                dci.OutputFormat    = cudaVideoSurfaceFormat_P016;
+#endif
+                            dci.DeinterlaceMode     = cudaVideoDeinterlaceMode_Weave; // no deinterlacing
+                            dci.ulTargetWidth       = cap.nMaxWidth;
+                            dci.ulTargetHeight      = cap.nMaxHeight;
+                            dci.ulNumOutputSurfaces = 1;
+                            dci.vidLock             = NULL;
+                            dci.target_rect.left    = dci.target_rect.top = 0;
+                            dci.target_rect.right   = (short) cap.nMaxWidth;
+                            dci.target_rect.bottom  = (short) cap.nMaxHeight;
+                            CUvideodecoder cuvidDecoder = nullptr;
+                            if (CUDA_SUCCESS==cuvidCreateDecoder(&cuvidDecoder, &dci) && cuvidDecoder) {
+#ifdef BL_AVDECODER_VERBOSE
+                                BL_LOG("    %s(%d-bit) %dx%d  %dx%d\n", codec[i], cap.nBitDepthMinus8+8,
+                                       cap.nMinWidth, cap.nMinHeight, cap.nMaxWidth, cap.nMaxHeight);
+#endif
+                                max_size->Width = cap.nMaxWidth;
+                                max_size->Height = cap.nMaxHeight;
+                                cuvidDestroyDecoder(cuvidDecoder);
+                            }
+                        }
+                    }
+                }
+
+                // pop
+                cuCtxPopCurrent(NULL);
+            }
+        }
+
+        //
+        // IF CUVID NOT INITED, try AMD AMF...
+        // must decoder->Init(amf::AMF_SURFACE_NV12, 3840, 2160) takes that long!?
+        assert(NULL==gpuCtx.amfContext);
+        if (NULL==gpuCtx.cudaContext && AMF_OK==g_AMFFactory.Init()) {
+            bool amf_init = false;
+            if (AMF_OK==g_AMFFactory.GetFactory()->CreateContext(&gpuCtx.amfContext) && gpuCtx.amfContext) {
+               // try create amf decoder - must communicate with gpu to see if it's really there.
+               // (the user may just get a new NVIDIA GPU)
+               amf::AMFComponentPtr decoder;
+               if (AMF_OK==gpuCtx.amfContext->InitDX9(NULL) &&
+                   AMF_OK==g_AMFFactory.GetFactory()->CreateComponent(gpuCtx.amfContext, AMFVideoDecoderUVD_H264_AVC, &decoder)) {
+                   if (AMF_OK==decoder->Init(amf::AMF_SURFACE_NV12, 3840, 2160)) {
+                       amf_init = true;
+                   }
+                   decoder->Terminate();
+                   decoder = NULL;
+               }
+            }
+
+            if (!amf_init) {
+#ifdef BL_AVDECODER_VERBOSE
+                BL_LOG("AMF Failed to initialize\n");
+#endif
+                gpuCtx.amfContext->Terminate();
+                gpuCtx.amfContext = NULL;
+                g_AMFFactory.Terminate();
+            }
+        }
+
+        gpuCtx.init = 1;
+        return 0;
+    }
+
+    return -1;
+}
+
+void DeinitContext()
+{
+    std::lock_guard<std::mutex> lock(gpuCtx.mutex);
+    assert(0!=gpuCtx.init && 0==gpuCtx.activeDecoders);
+    if (0!=gpuCtx.init && 0==gpuCtx.activeDecoders) {
+        if (gpuCtx.cudaContext) {
+            cuCtxDestroy(gpuCtx.cudaContext);
+            gpuCtx.cudaContext = NULL;
+        }
+
+        if (gpuCtx.amfContext) {
+            gpuCtx.amfContext->Terminate();
+            gpuCtx.amfContext = NULL;
+            g_AMFFactory.Terminate();
+        }
+        gpuCtx.init = 0;
+    }
+}
+
+int GPUAccelScore()
+{
+    std::lock_guard<std::mutex> lock(gpuCtx.mutex);
+    if (gpuCtx.cudaContext) {
+        return 3;
+    }
+
+    if (gpuCtx.amfContext) {
+        return 1;
+    }
+
+    return 0;
+}
+
+} // namespace hwaccel
+
+}}} // namespace mlabs::balai::video

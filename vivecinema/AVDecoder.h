@@ -95,7 +95,7 @@ class VideoDecoder {
     AVHWDeviceType  avctx_hwaccel_;
     int             packet_cnt_;
     int             frame_cnt_;
-    int             applicable_decoders_; // probably~
+    uint32          flags_; // available decoder mask
 
     // AVCodecContext.get_format callback
     static AVPixelFormat s_get_format_(AVCodecContext* avctx, AVPixelFormat const* pix_fmts);
@@ -103,19 +103,19 @@ class VideoDecoder {
 public:
     VideoDecoder():stream_(NULL),pImp_(NULL),avctx_(NULL),swsctx_(NULL),
         avctx_hwaccel_(AV_HWDEVICE_TYPE_NONE),
-        packet_cnt_(0),frame_cnt_(0),applicable_decoders_(0) {
+        packet_cnt_(0),frame_cnt_(0),flags_(0) {
         memset(&frame_, 0, sizeof(frame_));
         av_frame_unref(&frame_); // a must, frame_.format = AV_PIX_FMT_NONE(-1)
     }
     ~VideoDecoder() { Clear(); }
 
-    int NumAvailableVideoDecoders() const { return applicable_decoders_; };
+    uint32 Flags() const { return flags_; };
     int IsHardwareVideoDecoder() const {
         return (NULL!=pImp_) ? 2:((AV_HWDEVICE_TYPE_NONE!=avctx_hwaccel_) ? 1:0);
     }
     char const* Name() const;
 
-    bool Init(AVStream* stream, int w, int h);
+    bool Init(AVStream* stream, int w, int h, uint8& options);
     void Clear();
 
     bool Resume(); // get ready to accept packet
@@ -184,7 +184,6 @@ struct VideoOpenOption {
 };
 
 // customized input stream (via AVIOContext)
-#define AVIO_BUFFER_DEFAULT_SIZE 4096
 class IInputStream
 {
     mutable std::mutex mutex_;
@@ -461,13 +460,14 @@ class AVDecoder
     int subtitleRectCount_;
     int audioBytesPerFrame_; // bytes per frame(frame=channels*samples)
     int audioBytesPerSecond_; // bytes per second
+    uint8 videoDecoderPreference_; // 0:FFmpeg SW, 1:GPU(AMF/NVDEC), 2+:FFmpeg + hw accel.
     uint8 subtitleGraphicsFmt_; // subtitle format(pixel bytes) 1:DistanceMap 4:RGBA8
     uint8 subtitleBufferFlushing_; // subtitle switched, must flush buffer and force sync
     uint8 audioBufferFlushing_; // audio switched, must flush buffer and force sync
     uint8 liveStream_;  // 2016.12.30 just a hint(for larger buffering)
     uint8 endOfStream_; // end of stream(internet traffic) or end of file
     volatile uint8 interruptRequest_;
-    // pad 2 bytes...
+    // pad 1 byte...
 
     // open/close url/file/custom stream
     bool DoOpen_(AVFormatContext* fmtCtx, char const* url, VideoOpenOption const* param);
@@ -477,14 +477,14 @@ class AVDecoder
     // video and audio/subtitle threads
     void MainThread_();
 
-    // decode video frames from video packets
-    bool VideoThread_();
-
     // video seeking (STATUS_SEEKING) thread
     void SeekThread_();
 
-    // audio and subtitle thread
-    bool AudioAndSubtitleThread_();
+    // video decoding thread
+    bool VideoThread_();
+
+    // audio and subtitle decoding thread
+    bool AudioSubtitleThread_();
 
     // flush all buffers and queues
     void FlushBuffers_() {
@@ -542,8 +542,8 @@ class AVDecoder
         return 0;
     }
 
-    // Input stream
-    static int InputStreamRead_(void* is, uint8_t *buf, int buf_size) {
+    // input stream
+    static int InputStreamRead_(void* is, uint8_t* buf, int buf_size) {
         return (NULL!=is) ? (((IInputStream*)is)->Read(buf, buf_size)):0;
     }
     static int64_t InputStreamSeek_(void* is, int64_t offset, int whence) {
@@ -564,13 +564,13 @@ public:
     explicit AVDecoder(IAVDecoderHost* listener, int decoder_id=0);
     ~AVDecoder(); // not intent to be derived!
 
-    VIDEO_3D Stereoscopic3D() const { return stereo3D_; } // not accurate!
+    VIDEO_3D Stereoscopic3D() const { return stereo3D_; } // as metadata
     int VideoWidth() const { return videoWidth_; }
     int VideoHeight() const { return videoHeight_; }
     float VideoFrameRate() const { return ((float)videoFrameRate100x_)/100.0f; }
     float PlaybackProgress() const; // return playback progress [0.0, 1.0f]
     int VideoStreamID() const { return videoStreamIndex_; }
-    int SubtitleStreamID() const { return subtitleStreamIndex_; } /// external subtitles do not count!?
+    int SubtitleStreamID() const { return subtitleStreamIndex_; }
     int AudioStreamID() const { return audioStreamIndex_; }
     int TotalStreamCount() const { return (NULL!=formatCtx_) ? int(formatCtx_->nb_streams):0; }
     int VideoStreamCount() const { return videoStreamCount_; }
@@ -743,10 +743,22 @@ public:
     }
 
     // hardware(gpu) video decoder
-    int  IsHardwareVideoDecoder() const { return videoDecoder_.IsHardwareVideoDecoder(); }
-    int  NumAvailableVideoDecoders() const { return videoDecoder_.NumAvailableVideoDecoders(); }
-    bool ToggleHardwareVideoDecoder();
+    int IsHardwareVideoDecoder() const { return videoDecoder_.IsHardwareVideoDecoder(); }
+    int NumAvailableVideoDecoders() const {
+        uint32 flags = videoDecoder_.Flags();
+        if (flags&0x01) {
+            int decoders = 1;
+            while (flags>>=1) {
+                if (flags&0x01) {
+                    ++decoders;
+                }
+            }
+            return decoders;
+        }
+        return 0;
+    }
     char const* VideoDecoderName() const { return videoDecoder_.Name(); }
+    bool ToggleHardwareVideoDecoder();
 
     // return last subtitle pts and duration, in millisecond
     int SubtitleBuffering(int& extStreamId, bool& hardsub, int& start, int& duration) const {

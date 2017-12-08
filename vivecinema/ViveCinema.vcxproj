@@ -91,7 +91,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>../balai/include;../third_party/NVDEC/Samples/common/inc;../third_party/AMF;../third_party/FFmpeg/include;../third_party/uchardet/src;../third_party/glew/include/GL;../third_party/SDL2/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;HTC_VIVEPORT_RELEASE;BL_AVDECODER_VERBOSE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;INIT_CUDA_GL;_DEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;HTC_VIVEPORT_RELEASE;BL_AVDECODER_VERBOSE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -126,7 +126,7 @@ copy "$(TargetPath)" ".\bin\win32\$(TargetName)_vs2012_debug$(TargetExt)"</Comma
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>../balai/include;../third_party/NVDEC/Samples/common/inc;../third_party/AMF;../third_party/FFmpeg/include;../third_party/uchardet/src;../third_party/glew/include/GL;../third_party/SDL2/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;BL_AVDECODER_VERBOSE;HTC_VIVEPORT_RELEASE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;INIT_CUDA_GL;WIN64;_DEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;BL_AVDECODER_VERBOSE;HTC_VIVEPORT_RELEASE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader>
@@ -158,7 +158,7 @@ copy "$(TargetPath)" ".\bin\$(TargetName)_vs2012_debug$(TargetExt)"</Command>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>../balai/include;../third_party/NVDEC/Samples/common/inc;../third_party/AMF;../third_party/FFmpeg/include;../third_party/uchardet/src;../third_party/glew/include/GL;../third_party/SDL2/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;HTC_VIVEPORT_RELEASE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;INIT_CUDA_GL;NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;HTC_VIVEPORT_RELEASE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader />
@@ -194,7 +194,7 @@ copy "$(TargetPath)" ".\bin\win32\$(TargetName)$(TargetExt)"</Command>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>../balai/include;../third_party/NVDEC/Samples/common/inc;../third_party/AMF;../third_party/FFmpeg/include;../third_party/uchardet/src;../third_party/glew/include/GL;../third_party/SDL2/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;HTC_VIVEPORT_RELEASE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;INIT_CUDA_GL;NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;HTC_VIVEPORT_RELEASE;OPTIMIZING_SHOW_FRAME_TIMIING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader>
