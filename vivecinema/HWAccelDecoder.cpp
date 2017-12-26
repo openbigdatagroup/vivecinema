@@ -49,6 +49,7 @@
 #include "./amf/public/common/Thread.h" // amf_sleep()
 
 #include <mutex>
+#include <thread>
 
 //
 // not ready yet!
@@ -444,9 +445,9 @@ public:
 
         return true;
     }
-    bool receive_frame(uint8_t* nv12, int ww, int hh) {
-        assert(nv12 && ww==width_ && hh==height_);
-        if (nv12 && 0<framesLoaded_ && frame_) {
+    bool receive_frame(VideoFrame& frame) {
+        assert(frame.FramePtr && frame.Width==width_ && frame.Height==height_);
+        if (frame.FramePtr && 0<framesLoaded_ && frame_) {
             // convert to system memory. takes 10-15ms for a 4096x4096 frame on RX480
             int err = frame_->Convert(amf::AMF_MEMORY_HOST);
 
@@ -475,15 +476,16 @@ public:
             amf_int32 height    = plane->GetHeight();
             amf_int32 pitchH    = plane->GetHPitch();
             amf_int32 line_size = pixelSize*plane->GetWidth();
+            uint8_t* nv12 = (uint8_t*) frame.FramePtr;
             uint8_t const* s = ((uint8_t const*)(plane->GetNative())) + pitchH*plane->GetOffsetY() + pixelSize*plane->GetOffsetX();
             uint8_t* d = nv12;
-            if (pitchH==ww) {
+            if (pitchH==frame.Width) {
                 memcpy(d, s, line_size*height);
             }
             else {
                 for (amf_int32 y=0; y<height; ++y) {
                     memcpy(d, s, line_size);
-                    d += ww; s += pitchH;
+                    d += frame.Width; s += pitchH;
                 }
             }
 
@@ -494,14 +496,14 @@ public:
             pitchH    = plane->GetHPitch();
             line_size = pixelSize*plane->GetWidth();
             s = ((uint8_t const*)(plane->GetNative())) + pitchH*plane->GetOffsetY() + pixelSize*plane->GetOffsetX();
-            d = nv12 + ww*hh;
-            if (pitchH==ww) {
+            d = nv12 + frame.Width*frame.Height;
+            if (pitchH==frame.Width) {
                 memcpy(d, s, line_size*height);
             }
             else {
                 for (amf_int32 y=0; y<height; ++y) {
                     memcpy(d, s, line_size);
-                    d += ww; s += pitchH;
+                    d += frame.Width; s += pitchH;
                 }
             }
 
@@ -535,17 +537,22 @@ class CUVIDDecoder : public VideoDecoderImp
     CUvideoparser       cuvidParser_;
     CUcontext           cuCtx_;
     AVBSFContext*       bsfCtx_;
-    void*               hostPtr_;
-    int                 hostPtrSize_;
+
+    // working memory scratchpad
+    CUdeviceptr         cuPtr_;     // cuda devide ptr for CUDA/OpenGL interop
+    int                 cuPtrSize_;
+
     int                 numSurfaces_;
     int                 width_, height_;
     int                 framePut_, frameGet_;
+    int                 cuFramePut_, cuFrameGet_;
 
     // called before decoding frames and/or whenever there is a format change
     static int CUDAAPI sVideoSequenceCallback_(void* opaque, CUVIDEOFORMAT* fmt) {
         return opaque && fmt && ((CUVIDDecoder*)opaque)->CreateDecoder_(fmt);
     }
     // called when a picture is ready to be decoded (decode order)
+    // (this actually calls the hardware VP/CUDA to decode video frames)
     static int CUDAAPI sPictureDecodeCallback_(void* opaque, CUVIDPICPARAMS* pp) {
         return opaque && pp &&
             CUDA_SUCCESS==cuvidDecodePicture(((CUVIDDecoder*)opaque)->cuvidDecoder_, pp);
@@ -656,85 +663,24 @@ class CUVIDDecoder : public VideoDecoderImp
 
         return (NULL!=cuvidDecoder_);
     }
+
     bool PictureDisplay_(CUVIDPARSERDISPINFO* dinfo) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        for (int i=0; i<500; ++i) {
+            // send_packet() already lock the mutex_. Don't do it here!!!
+            //std::lock_guard<std::mutex> lock(mutex_);
+            if (framePut_<(frameGet_+numSurfaces_)) {
+                cuvidParsedFrames_[(framePut_++)%MAX_CUVID_PARSED_FRAMES] = *dinfo;
+                return true;
+            }
+            else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+        }
+
+        // wait too long, discard most outdated frames
         cuvidParsedFrames_[(framePut_++)%MAX_CUVID_PARSED_FRAMES] = *dinfo;
-        if ((frameGet_+numSurfaces_)<framePut_) {
-            int const next_get = framePut_ - numSurfaces_;
-            BL_LOG("** CUVIDDecoder::PictureDisplay_() : drop frames Pictures ID = {");
-            for (int i=frameGet_; i<next_get; ++i) {
-                 CUVIDPARSERDISPINFO& drop = cuvidParsedFrames_[i%MAX_CUVID_PARSED_FRAMES];
-                 BL_LOG(" #%d", drop.picture_index);
-            }
-            BL_LOG(" }, total=%d\n", next_get-frameGet_);
-            frameGet_ = next_get;
-        }
-        return true;
-    }
-
-    bool MapFrame_(uint8* frame, CUVIDPARSERDISPINFO const& info) {
-        CUVIDPROCPARAMS params;
-        memset(&params, 0, sizeof(CUVIDPROCPARAMS));
-        params.progressive_frame = info.progressive_frame;
-        params.top_field_first = info.top_field_first;
-        params.unpaired_field = (info.repeat_first_field<0);
-        CUdeviceptr cuDevPtr = 0;
-        unsigned int pitch = 0;
-
-//#define TRACK_MEMCPY_D_TO_H_TIME
-#ifdef TRACK_MEMCPY_D_TO_H_TIME
-        static int scounter = 0;
-        static int64_t stime = 0;
-        int64_t t0 = av_gettime();
-#endif
-        // map video frame
-        int err = cuvidMapVideoFrame(cuvidDecoder_, info.picture_index, &cuDevPtr, &pitch, &params);
-        if (CUDA_SUCCESS==err) {
-            int const scan_lines = height_ + height_/2;
-            int const data_size = pitch*scan_lines;
-            if (NULL==hostPtr_ || hostPtrSize_<data_size) {
-                if (NULL!=hostPtr_) {
-                    cuMemFreeHost(hostPtr_);
-                    hostPtr_ = NULL;
-                }
-                hostPtrSize_ = 0;
-                if (CUDA_SUCCESS==cuMemAllocHost(&hostPtr_, data_size)) {
-                    hostPtrSize_ = data_size;
-                }
-            }
-
-            bool const got_frame = (NULL!=hostPtr_) && (CUDA_SUCCESS==cuMemcpyDtoH(hostPtr_, cuDevPtr, data_size));
-
-            // unmap video frame
-            cuvidUnmapVideoFrame(cuvidDecoder_, cuDevPtr);
-
-            if (got_frame) {
-                if ((int)pitch>width_) {
-                    uint8* d = (uint8*) frame;
-                    uint8 const* s = (uint8 const*) hostPtr_;
-                    for (int i=0; i<scan_lines; ++i) {
-                        memcpy(d, s, width_);
-                        d+=width_; s+=pitch;
-                    }
-                }
-                else {
-                    assert((int)pitch==width_);
-                    memcpy(frame, hostPtr_, data_size);
-                }
-            }
-
-#ifdef TRACK_MEMCPY_D_TO_H_TIME
-            stime += av_gettime() - t0;
-            if (++scounter>100) {
-                BL_LOG("** cuMemcpyDtoH() : %lldus(avg)\n", stime/100);
-                stime = scounter = 0;
-            }
-#endif
-            return got_frame;
-        }
-
-        BL_LOG("** cuvidMapVideoFrame() failed(%d)\n", err);
-        return false;
+        frameGet_ = framePut_ - numSurfaces_;
+        return true; // return false will terminate video decoding
     }
 
     BL_NO_DEFAULT_CTOR(CUVIDDecoder);
@@ -743,8 +689,8 @@ class CUVIDDecoder : public VideoDecoderImp
 public:
     CUVIDDecoder(AVCodecID codec):VideoDecoderImp(codec),
         mutex_(),cuvidDecoder_(NULL),cuvidParser_(NULL),cuCtx_(NULL),bsfCtx_(NULL),
-        hostPtr_(NULL),hostPtrSize_(0),
-        numSurfaces_(0),width_(0),height_(0),framePut_(0),frameGet_(0) {
+        cuPtr_(NULL),cuPtrSize_(0),
+        numSurfaces_(0),width_(0),height_(0),framePut_(0),frameGet_(0),cuFramePut_(0),cuFrameGet_(0) {
         memset(&cuvidParsedFrames_, 0, sizeof(cuvidParsedFrames_));
         memset(&cuvidFmt_, 0, sizeof(cuvidFmt_));
     }
@@ -767,13 +713,16 @@ public:
 
         cuCtx_ = NULL;
 
-        if (hostPtr_) {
-            cuMemFreeHost(hostPtr_);
-            hostPtr_ = NULL;
+        if (cuPtr_) {
+            cuMemFree(cuPtr_);
+            cuPtr_ = NULL;
         }
+        cuPtrSize_ = 0;
+
         memset(&cuvidParsedFrames_, 0, sizeof(cuvidParsedFrames_));
         memset(&cuvidFmt_, 0, sizeof(cuvidFmt_));
-        hostPtrSize_ = numSurfaces_ = width_ = height_ = framePut_ = frameGet_ = 0;
+        numSurfaces_ = width_ = height_ = 0;
+        framePut_ = frameGet_ = cuFramePut_ = cuFrameGet_ = 0;
     }
 
     // identity
@@ -805,7 +754,7 @@ public:
         }
         else {
             //
-            // more...?
+            // more filters?
             //
             AVBitStreamFilter* bsf = NULL;
             while (NULL!=(bsf=av_bitstream_filter_next(bsf))) {
@@ -833,7 +782,7 @@ public:
             if (bsfCtx_->par_out->extradata_size<sizeof(cuvidFmt_.raw_seqhdr_data)) {
                 cuvidFmt_.format.seqhdr_data_length = bsfCtx_->par_out->extradata_size;
             }
-            else { // error!?
+            else { // error!
                 cuvidFmt_.format.seqhdr_data_length = sizeof(cuvidFmt_.raw_seqhdr_data);
             }
             memcpy(cuvidFmt_.raw_seqhdr_data, bsfCtx_->par_out->extradata, cuvidFmt_.format.seqhdr_data_length);
@@ -842,12 +791,13 @@ public:
             if (codecpar->extradata_size<sizeof(cuvidFmt_.raw_seqhdr_data)) {
                 cuvidFmt_.format.seqhdr_data_length = codecpar->extradata_size;
             }
-            else { // error!?
+            else { // error!
                 cuvidFmt_.format.seqhdr_data_length = sizeof(cuvidFmt_.raw_seqhdr_data);
             }
             memcpy(cuvidFmt_.raw_seqhdr_data, codecpar->extradata, cuvidFmt_.format.seqhdr_data_length);
         }
 
+        // to cuvidCreateDecoder() need cuda context
         if (CUDA_SUCCESS==cuCtxPushCurrent(cuCtx)) {
             int const coded_width  = avctx->coded_width;
             int const coded_height = avctx->coded_height;
@@ -897,14 +847,20 @@ public:
             fmt.bitrate                 = 0; // video bitrate (bps, 0=unknown)
             fmt.display_aspect_ratio.x  = codecpar->width;
             fmt.display_aspect_ratio.y  = codecpar->height;
-            // fmt.video_signal_description to be determined
-            //fmt.video_signal_description.video_format           = 0; // bitfield[3]
-            //fmt.video_signal_description.video_full_range_flag  = 0; // bitfield[1]
-            //fmt.video_signal_description.reserved_zero_bits     = 0; // bitfield[4]
-            //fmt.video_signal_description.color_primaries          = (unsigned char) avctx->color_primaries;
-            //fmt.video_signal_description.transfer_characteristics = (unsigned char) avctx->color_trc;
-            //fmt.video_signal_description.matrix_coefficients      = (unsigned char) avctx->colorspace;
+#if 0
+            //////////////////////////////////////////////////////////////////////////////////////////////
+            // fmt.video_signal_description to be determined, not necessary to set all properties here. //
+            //////////////////////////////////////////////////////////////////////////////////////////////
+            fmt.video_signal_description.video_format           = 0; // bitfield[3]
+            fmt.video_signal_description.video_full_range_flag  = 0; // bitfield[1]
+            fmt.video_signal_description.reserved_zero_bits     = 0; // bitfield[4]
 
+            // ffmpeg/libavcodec/cuvid.c
+            fmt.video_signal_description.color_primaries          = (unsigned char) codecpar->color_primaries;
+            fmt.video_signal_description.transfer_characteristics = (unsigned char) codecpar->color_trc;
+            fmt.video_signal_description.matrix_coefficients      = (unsigned char) codecpar->color_space;
+#endif
+            cuCtx_ = cuCtx;
             if (CreateDecoder_(&fmt)) {
                 // cuvid parser params struct
                 CUVIDPARSERPARAMS pps;
@@ -944,37 +900,25 @@ public:
                         }
                     }
 
-                    ////////////////////////////////////////////
-                    // host memory... should be removed soon...
-                    ////////////////////////////////////////////
+                    // allocate memory
                     if (NULL!=cuvidParser_) {
-                        // alloc memory (1KB boundary)
-                        // width=640  -> pitch=1024
-                        // width=1280 -> pitch=1536
-                        // width=2304 -> pitch=2560
-                        // boundary could be 256 or 512
-                        int const pitch = (width+1023)&~1023;
-                        int const size  = pitch*(height + height/2);
-                        if (NULL==hostPtr_ || hostPtrSize_<size) {
-                            if (NULL!=hostPtr_) {
-                                cuMemFreeHost(hostPtr_);
+                        int const interop_size = NUM_VIDEO_BUFFER_FRAMES*width*(height + height/2);
+                        if (NULL==cuPtr_ || cuPtrSize_<interop_size) {
+                            if (NULL!=cuPtr_) {
+                                cuMemFree(cuPtr_);
                             }
-                            hostPtr_ = NULL;
-                            hostPtrSize_ = 0;
-                            if (CUDA_SUCCESS==cuMemAllocHost(&hostPtr_, size)) {
-                                hostPtrSize_ = size;
+
+                            if (CUDA_SUCCESS==cuMemAlloc(&cuPtr_, interop_size)) {
+                                cuPtrSize_ = interop_size;
                             }
                             else {
-                                cuvidDestroyVideoParser(cuvidParser_);
-                                cuvidParser_ = NULL;
+                                cuPtr_ = NULL;
+                                cuPtrSize_ = 0;
                             }
                         }
                     }
 
-                    if (NULL!=cuvidParser_) {
-                        cuCtx_ = cuCtx; // final succeed
-                    }
-                    else {
+                    if (NULL==cuvidParser_) {
                         cuvidDestroyDecoder(cuvidDecoder_);
                         cuvidDecoder_ = NULL;
                     }
@@ -986,7 +930,7 @@ public:
 
             cuCtxPopCurrent(NULL);
 
-            if (NULL!=cuCtx_) {
+            if (NULL!=cuvidDecoder_) {
                 return true;
             }
         }
@@ -995,111 +939,104 @@ public:
         return false;
     }
 
+    void Flush() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        framePut_ = frameGet_ = cuFramePut_ = cuFrameGet_ = 0;
+        CUcontext ctx_cur = NULL;
+        if (cuCtx_ && CUDA_SUCCESS==cuCtxGetCurrent(&ctx_cur)) {
+            assert(cuvidParser_);
+            int pop_ctx = 0;
+            if (ctx_cur!=cuCtx_) {
+                if (CUDA_SUCCESS==cuCtxPushCurrent(cuCtx_)) {
+                    pop_ctx = 1;
+                }
+                else {
+                    BL_ERR("** [Fatal] CUVIDDecoder::Flush() - failed to push current CUDA context(%p)!!!\n", cuCtx_);
+                    pop_ctx = -1;
+                }
+            }
+
+            if (0<=pop_ctx) {
+#if 0
+                // to send a discontinuity packet does not work! so we rebuilt cuvidParser
+                CUVIDSOURCEDATAPACKET cupkt;
+                cupkt.flags = CUVID_PKT_DISCONTINUITY;
+                cupkt.payload_size = 0;
+                cupkt.payload = NULL;
+                cupkt.timestamp = 0;
+                cuvidParseVideoData(cuvidParser_, &cupkt);
+#else
+                // re-build video parser...
+                CUresult err = cuvidDestroyVideoParser(cuvidParser_);
+                cuvidParser_ = NULL;
+
+                CUVIDPARSERPARAMS pps;
+                memset(&pps, 0, sizeof(pps));
+                pps.CodecType              = cuvidFmt_.format.codec;
+                pps.ulMaxNumDecodeSurfaces = numSurfaces_;
+
+                // Timestamp units in Hz (0=default=10000000Hz) 
+                //pps.ulClockRate         = 0;
+
+                // Error threshold (0-100) for calling pfnDecodePicture (100=always call
+                // pfnDecodePicture even if picture bitstream is fully corrupted)
+                //pps.ulErrorThreshold    = 0;
+
+                // Max display queue delay (improves pipelining of decode with display)
+                // 0=no delay (recommended values: 2..4)
+                pps.ulMaxDisplayDelay   = 1;
+                pps.pUserData           = this;
+                pps.pfnSequenceCallback = sVideoSequenceCallback_;
+                pps.pfnDecodePicture    = sPictureDecodeCallback_;
+                pps.pfnDisplayPicture   = sPictureDisplayCallback_;
+                pps.pExtVideoInfo       = &cuvidFmt_; // [Optional] sequence header data from system layer
+                err = cuvidCreateVideoParser(&cuvidParser_, &pps);
+                if (CUDA_SUCCESS!=err) {
+                    BL_ERR("** [Fatal] CUVIDDecoder::Flush() - failed to create video parser!!!\n");
+                }
+/*
+                // decoder is fine...
+                if (cuvidDecoder_) {
+                    cuvidDestroyDecoder(cuvidDecoder_);
+                    cuvidDecoder_ = NULL;
+                }
+*/
+#endif
+                if (pop_ctx) {
+                    cuCtxPopCurrent(&ctx_cur);
+                }
+            }
+        }
+    }
+
+    // video decoding thread
     bool Resume() {
         std::lock_guard<std::mutex> lock(mutex_);
-        framePut_ = frameGet_ = 0;
+        framePut_ = frameGet_ = cuFramePut_ = cuFrameGet_ = 0;
         return cuCtx_ && (CUDA_SUCCESS==cuCtxPushCurrent(cuCtx_));
     }
     bool Pause() {
         std::lock_guard<std::mutex> lock(mutex_);
-        framePut_ = frameGet_ = 0;
+        framePut_ = frameGet_ = cuFramePut_ = cuFrameGet_ = 0;
         CUcontext dummy = NULL;
         return cuCtx_ && (CUDA_SUCCESS==cuCtxPopCurrent(&dummy)) && dummy==cuCtx_;
     }
-    void Flush() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        framePut_ = frameGet_ = 0;
-        CUcontext ctx_cur = NULL;
-        if (cuCtx_ && CUDA_SUCCESS==cuCtxGetCurrent(&ctx_cur)) {
-            assert(cuvidParser_);
-            //assert(cuvidDecoder_);
-#if 0
-            BL_LOG("** CUVIDDecoder::Flush() - cuCtx_(0x%p) cuvidParser_(0x%p) cuvidDecoder_(0x%p)\n",
-                   cuCtx_, cuvidParser_, cuvidDecoder_);
-#endif
-            bool pop_ctx = false;
-            if (ctx_cur!=cuCtx_) {
-                if (CUDA_SUCCESS==cuCtxPushCurrent(cuCtx_)) {
-                    pop_ctx = true;
-                }
-                else {
-                    BL_ERR("** [Fatal] CUVIDDecoder::Flush() - failed to push current CUDA context(%p)!!!\n", cuCtx_);
-                    return; // failed!?
-                }
-            }
-#if 0
-            //
-            // to send a discontinuity packet does not work!
-            //
-            CUVIDSOURCEDATAPACKET cupkt;
-            cupkt.flags = CUVID_PKT_DISCONTINUITY;
-            cupkt.payload_size = 0;
-            cupkt.payload = NULL;
-            cupkt.timestamp = 0;
-            CUresult err = cuvidParseVideoData(cuvidParser_, &cupkt);
-            if (CUDA_SUCCESS!=err) {
-                BL_LOG("** cuvidParseVideoData(CUVID_PKT_DISCONTINUITY) error(%d)\n", err);
-            }
-#else
-            //
-            // re-build video parser...
-            cuvidDestroyVideoParser(cuvidParser_);
-            cuvidParser_ = NULL;
-
-            CUVIDPARSERPARAMS pps;
-            memset(&pps, 0, sizeof(pps));
-            pps.CodecType              = cuvidFmt_.format.codec;
-            pps.ulMaxNumDecodeSurfaces = numSurfaces_;
-
-            // Timestamp units in Hz (0=default=10000000Hz) 
-            //pps.ulClockRate         = 0;
-
-            // Error threshold (0-100) for calling pfnDecodePicture (100=always call
-            // pfnDecodePicture even if picture bitstream is fully corrupted)
-            //pps.ulErrorThreshold    = 0;
-
-            // Max display queue delay (improves pipelining of decode with display)
-            // 0=no delay (recommended values: 2..4)
-            pps.ulMaxDisplayDelay   = 1;
-            pps.pUserData           = this;
-            pps.pfnSequenceCallback = sVideoSequenceCallback_;
-            pps.pfnDecodePicture    = sPictureDecodeCallback_;
-            pps.pfnDisplayPicture   = sPictureDisplayCallback_;
-            pps.pExtVideoInfo       = &cuvidFmt_; // [Optional] sequence header data from system layer
-            if (CUDA_SUCCESS==cuvidCreateVideoParser(&cuvidParser_, &pps)) {
-            }
-            else {
-                BL_ERR("** [Fatal] CUVIDDecoder::Flush() - failed to create video parser!!!\n");
-            }
-/*
-            // decoder is fine...
-            if (cuvidDecoder_) {
-                cuvidDestroyDecoder(cuvidDecoder_);
-                cuvidDecoder_ = NULL;
-            }
-*/
-#endif
-            if (pop_ctx) {
-                cuCtxPopCurrent(&ctx_cur);
-            }
-        }
-    }
     bool can_send_packet() {
         std::lock_guard<std::mutex> lock(mutex_);
-        return framePut_<(frameGet_+4); // don't read too much
-        //return framePut_<(frameGet_+numSurfaces_/2);
+        return framePut_<(frameGet_+numSurfaces_) && framePut_<(frameGet_+4);
     }
     bool can_receive_frame(int64_t& pts, int64_t& dur) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (frameGet_<framePut_) {
             pts = cuvidParsedFrames_[frameGet_%MAX_CUVID_PARSED_FRAMES].timestamp;
             dur = AV_NOPTS_VALUE; // unknown!? this does no harms...
-            return true;
+            return (NULL==cuPtr_ || (cuFramePut_<(cuFrameGet_+NUM_VIDEO_BUFFER_FRAMES)));
         }
         return false;
     }
     bool send_packet(AVPacket const& pkt) {
-        if (cuvidParser_ && pkt.size>0 /*&& CUDA_SUCCESS==cuCtxPushCurrent(cuda_ctx_)*/) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (cuvidParser_ && pkt.size>0) {
             CUVIDSOURCEDATAPACKET cupkt;
             //
             // CUVID_PKT_ENDOFSTREAM   = 0x01,   /**< Set when this is the last packet for this stream  */
@@ -1153,20 +1090,73 @@ public:
                     BL_LOG("** cuda error=%d\n", err);
                 }
             }
-
-//            CUcontext dummy(NULL);
-//            cuCtxPopCurrent(&dummy);
         }
         return true;
     }
-    bool receive_frame(uint8_t* nv12, int width, int height) {
-        assert(nv12 && width==width_ && height==height_);
+    bool receive_frame(VideoFrame& frame) {
+        assert(frame.Width==width_ && frame.Height==height_);
         std::lock_guard<std::mutex> lock(mutex_);
-        if (frameGet_<framePut_) {
-            int const id = (frameGet_++)%MAX_CUVID_PARSED_FRAMES;
-            if (width==width_ && height==height_ && MapFrame_(nv12, cuvidParsedFrames_[id])) {
-                //BL_LOG("[receive_frame] MapFrame_() pts:%lld\n", cuvidParsedFrames_[id].timestamp);
-                return true;
+        if (frameGet_<framePut_ && frame.Width==width_ && frame.Height==height_) {
+            CUVIDPARSERDISPINFO const& info = cuvidParsedFrames_[(frameGet_++)%MAX_CUVID_PARSED_FRAMES];
+            CUVIDPROCPARAMS params;
+            memset(&params, 0, sizeof(CUVIDPROCPARAMS));
+            params.progressive_frame = info.progressive_frame;
+            params.top_field_first = info.top_field_first;
+            params.unpaired_field = (info.repeat_first_field<0);
+            CUdeviceptr cuDevPtr = 0;
+            unsigned int pitch = 0;
+
+            //
+            // Note : to copy data from D to D is asynchronous. profiling here have no nonsense!
+            //
+
+            int err = cuvidMapVideoFrame(cuvidDecoder_, info.picture_index, &cuDevPtr, &pitch, &params);
+            if (CUDA_SUCCESS==err) {
+                int const scan_lines = height_ + height_/2; // y plane + uv plane (YUV420)
+
+                CUDA_MEMCPY2D mc2d;
+                memset(&mc2d, 0, sizeof(mc2d));
+                mc2d.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+                mc2d.srcDevice     = cuDevPtr;
+                mc2d.srcPitch      = pitch;
+
+                assert(NULL==cuPtr_ || (cuFramePut_<(cuFrameGet_+NUM_VIDEO_BUFFER_FRAMES)));
+                if (cuPtr_ && (cuFramePut_<(cuFrameGet_+NUM_VIDEO_BUFFER_FRAMES))) {
+                    mc2d.dstMemoryType = CU_MEMORYTYPE_DEVICE; // D to D, asynchronous copy
+                    mc2d.dstDevice     = cuPtr_ + (cuFramePut_%NUM_VIDEO_BUFFER_FRAMES)*width_*scan_lines;
+
+                    // CUDA ptr
+                    frame.FramePtr = mc2d.dstDevice;
+                    frame.Type     = VideoFrame::NV12_CUDA;
+                    frame.ID       = cuFramePut_++;
+                }
+                else {
+                    mc2d.dstMemoryType = CU_MEMORYTYPE_HOST; // D to H, synchronous copy
+                    mc2d.dstHost       = (uint8*) frame.FramePtr;
+
+                    // host ptr
+                    frame.Type = VideoFrame::NV12;
+                }
+
+                mc2d.dstPitch     = width_;
+                mc2d.WidthInBytes = width_;
+                mc2d.Height       = scan_lines;
+
+                if ((CUDA_SUCCESS==cuMemcpy2D(&mc2d)) &&
+                    (CUDA_SUCCESS==cuvidUnmapVideoFrame(cuvidDecoder_, cuDevPtr))) {
+                    //
+                    // to decide frame.ColorSpace and frame.ColorRange, check -
+                    //  cuvidFmt_.format.video_signal_description.color_primaries = (unsigned char) codecpar->color_primaries;
+                    //  cuvidFmt_.format.video_signal_description.transfer_characteristics = (unsigned char) codecpar->color_trc;
+                    //  cuvidFmt_.format.video_signal_description.matrix_coefficients = (unsigned char) codecpar->color_space;
+                    //
+                    frame.Width  = width_;
+                    frame.Height = height_;
+                    return true;
+                }
+            }
+            else {
+                BL_LOG("** cuvidMapVideoFrame() failed(%d)\n", err);
             }
         }
         return false;
@@ -1178,6 +1168,19 @@ public:
             return true;
         }
         return false;
+    }
+
+    // render thread
+    bool finish_frame(VideoFrame& frame) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (VideoFrame::NV12_CUDA==frame.Type) {
+            assert(cuFrameGet_<cuFramePut_);
+            assert(cuFrameGet_==frame.ID);
+            ++cuFrameGet_;
+            frame.FramePtr = 0;
+            frame.Type = VideoFrame::NV12;
+        }
+        return true;
     }
 };
 
@@ -1205,7 +1208,7 @@ VideoDecoderImp* VideoDecoderImp::New(AVStream const* stream, int width, int hei
         if (gpuCtx.cudaContext) {
             cudaVideoCodec const nvCodec = getCuvidCodec(codec_id);
 
-            GPUContext::MaxSize const* max_sizes = NULL; gpuCtx.cuvidCaps8;
+            GPUContext::MaxSize const* max_sizes = NULL;
             switch (stream->codec->pix_fmt)
             {
             // planar YUV 4:2:0, 15bpp, (1 Cr & Cb sample per 2x2 Y samples)
@@ -1263,7 +1266,7 @@ VideoDecoderImp* VideoDecoderImp::New(AVStream const* stream, int width, int hei
                             delete decoder;
                         }
                     }
-                    catch(...) {
+                    catch (...) {
                     }
                 }
             }
@@ -1361,16 +1364,12 @@ int InitContext(void* /*device*/)
             if (0<=best_device_index && CUDA_SUCCESS==cuDeviceGet(&cuda_device, best_device_index) &&
 #if INIT_CUDA_GL
                 CUDA_SUCCESS==cuGLCtxCreate(&gpuCtx.cudaContext, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device) && gpuCtx.cudaContext) {
-#else
-#if INIT_CUDA_D3D9
+#elif INIT_CUDA_D3D9
                 CUDA_SUCCESS==cuD3D9CtxCreate(&gpuCtx.cudaContext, &cuda_device, CU_CTX_SCHED_BLOCKING_SYNC, (IDirect3DDevice9*) device) && gpuCtx.cudaContext) {
-#else
-#if INIT_CUDA_D3D11
+#elif INIT_CUDA_D3D11
                 CUDA_SUCCESS==cuD3D11CtxCreate(&gpuCtx.cudaContext, &cuda_device, CU_CTX_SCHED_BLOCKING_SYNC, (ID3D11Device*) device) && gpuCtx.cudaContext) {
 #else
                 CUDA_SUCCESS==cuCtxCreate(&gpuCtx.cudaContext, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device) && gpuCtx.cudaContext) {
-#endif
-#endif
 #endif
 
 #ifdef BL_AVDECODER_VERBOSE
@@ -1408,6 +1407,14 @@ int InitContext(void* /*device*/)
                         cap.nBitDepthMinus8 = bit_depth_minus_8[j];
                         GPUContext::MaxSize* max_size = max_sizes[j];
                         max_size->Width = max_size->Height = 0;
+
+                        //
+                        // from NvDecode samples...
+                        // If XxY is max supported resolution for a codec on a GPU and YxX resolution
+                        // is also supported then Max Supported width is Max(X, Y) and Max supported height is Max(X, Y)
+                        // But Max supported MBCount is XxY / 256.
+                        // E.g. 4096x2304 is max supported resolution and 2304x4096 is also supported then
+                        // Max Width = 4096, Max Height = 4096, But Max supported MB Count = 4096*2304 / 256 = 36864
                         if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported) {
                             // confirm again! note cuvidGetDecoderCaps() may lie.
                             // it makes us to create CUvideodecoder here!
@@ -1451,7 +1458,6 @@ int InitContext(void* /*device*/)
                     }
                 }
 
-                // pop
                 cuCtxPopCurrent(NULL);
             }
         }
@@ -1526,6 +1532,189 @@ int GPUAccelScore()
     return 0;
 }
 
+bool UnregisterGraphicsObject(void* obj)
+{
+    if (obj) {
+        std::lock_guard<std::mutex> lock(gpuCtx.mutex);
+
+        //
+        // CUDA
+        CUcontext ctx_cur = NULL;
+        if (NULL!=gpuCtx.cudaContext && CUDA_SUCCESS==cuCtxGetCurrent(&ctx_cur)) {
+            int pop_ctx = 0;
+            if (gpuCtx.cudaContext!=ctx_cur) {
+                if (CUDA_SUCCESS==cuCtxPushCurrent(gpuCtx.cudaContext)) {
+                    pop_ctx = 1;
+                }
+                else {
+                    pop_ctx = -1;
+                }
+            }
+
+            if (0<=pop_ctx) {
+                CUresult err = CUDA_ERROR_UNKNOWN;
+#if INIT_CUDA_GL
+                err = cuGLUnregisterBufferObject(*((GLuint*)obj));
+#elif INIT_CUDA_D3D9
+                err = cuD3D9UnregisterResource(*((IDirect3DTexture9**)obj))
+#else // D3D11 and others
+                err = cuGraphicsUnregisterResource(*((CUgraphicsResource*)obj));
+#endif
+                if (0<pop_ctx) {
+                    cuCtxPopCurrent(NULL);
+                }
+
+                return (CUDA_SUCCESS==err);
+            }
+        }
+
+        //
+        // TO-DO : AMD AMF and others!?
+        //
+
+
+    }
+
+    return false;
+}
+
+//
+// Cuda / OpenGL interop
+bool CudaCopyVideoFrame(GLuint glPBO, VideoFrame const& frame)
+{
+    if (NULL!=gpuCtx.cudaContext && VideoFrame::NV12_CUDA==frame.Type) {
+        CUcontext ctx_cur;
+        if (CUDA_SUCCESS==cuCtxGetCurrent(&ctx_cur)) {
+            int pop_ctx = 0;
+            if (gpuCtx.cudaContext!=ctx_cur) {
+                if (CUDA_SUCCESS==cuCtxPushCurrent(gpuCtx.cudaContext)) {
+                    pop_ctx = 1;
+                }
+                else {
+                    pop_ctx = -1;
+                }
+            }
+
+            if (0<=pop_ctx) {
+                size_t const frame_size = frame.Width*frame.Height*3/2;
+
+                size_t map_size = 0;
+                CUdeviceptr dst = NULL;
+                CUresult res = cuGLMapBufferObject(&dst, &map_size, glPBO);
+                if (CUDA_SUCCESS==res) {
+                    if (dst && frame_size<=map_size) {
+                        // copy data from D to D is asynchronous.
+                        res = cuMemcpyDtoD(dst, (CUdeviceptr) frame.FramePtr, frame_size);
+                        BL_ASSERT2(CUDA_SUCCESS==res, "cuMemcpyDtoD() failed!");
+                    }
+                    else {
+                        BL_LOG("cuGLMapBufferObject() %p size=%d\n", dst, map_size);
+                    }
+                    res = cuGLUnmapBufferObject(glPBO);
+                    BL_ASSERT2(CUDA_SUCCESS==res, "cuGLUnmapBufferObject() failed!");
+                }
+                else {
+                    BL_LOG("cuGLMapBufferObject() failed!\n");
+                }
+
+                if (pop_ctx) {
+                    cuCtxPopCurrent(NULL);
+                }
+
+                return (CUDA_SUCCESS==res);
+            }
+        }
+    }
+    return false;
+}
+
 } // namespace hwaccel
+
+//---------------------------------------------------------------------------------------
+bool VideoTexture::Resize(int w, int h)
+{
+    std::lock_guard<std::mutex> lock(gpuCtx.mutex);
+    if (glPBO_) {
+        int const pixel_size = w*h;
+        int const frame_size = pixel_size*3/2;
+
+        //
+        // CUDA
+        CUcontext ctx_cur = 0;
+        if (NULL!=gpuCtx.cudaContext && CUDA_SUCCESS==cuCtxGetCurrent(&ctx_cur)) {
+            int pop_ctx = 0;
+            if (gpuCtx.cudaContext!=ctx_cur) {
+                if (CUDA_SUCCESS==cuCtxPushCurrent(gpuCtx.cudaContext)) {
+                    pop_ctx = 1;
+                }
+                else {
+                    pop_ctx = -1;
+                }
+            }
+
+            if (0<=pop_ctx) {
+                //
+                // If PBO size had changed, re-register PBO is required.
+                if (cuRegSize_!=frame_size) {
+                    if (0<cuRegSize_) {
+                        cuGLUnregisterBufferObject(glPBO_);
+                        cuRegSize_ = 0;
+                    }
+                    else if (cuRegSize_<0) {
+                        // WEIRD? re-gen buffer is also required for GFX TITAN X(Maxwell)
+                        // (if ClearBlack() had been called with cuRegSize_<=0)
+                        glDeleteBuffers(1, &glPBO_); glPBO_ = 0;
+                        glGenBuffers(1, &glPBO_);
+                    }
+
+                    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, glPBO_);
+                    glBufferData(GL_PIXEL_UNPACK_BUFFER, frame_size, NULL, GL_DYNAMIC_COPY);
+                    if (CUDA_SUCCESS==cuGLRegisterBufferObject(glPBO_)) {
+                        cuRegSize_ = frame_size;
+                    }
+                    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                }
+
+                bool cleared = false;
+                CUdeviceptr ptr = NULL;
+                size_t size = 0;
+                CUresult res = cuGLMapBufferObject(&ptr, &size, glPBO_);
+                if (CUDA_SUCCESS==res) {
+                    if (ptr && frame_size==(int)size) {
+                        cuMemsetD8(ptr, 0x10, w*h);
+                        cuMemsetD8(ptr+w*h, 0x80, w*h/2);
+                    }
+                    else {
+                        BL_LOG("cuGLMapBufferObject() %p size=%d\n", ptr, size);
+                    }
+                    res = cuGLUnmapBufferObject(glPBO_);
+                    if (CUDA_SUCCESS==res) {
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, glPBO_);
+                        cleared = yPlane_->UpdateImage((uint16)w, (uint16)h, graphics::FORMAT_I8, 0) &&
+                                 uvPlane_->UpdateImage(uint16(w/2), uint16(h/2), graphics::FORMAT_IA8, (void const*) pixel_size);
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                    }
+                }
+                else {
+                    BL_LOG("cuGLMapBufferObject() failed!\n");
+                }
+
+                if (pop_ctx) {
+                    cuCtxPopCurrent(NULL);
+                }
+
+                if (cleared)
+                    return true;
+            }
+        }
+
+        //
+        // AMD AMF and others!?
+
+        return ClearBlack();
+    }
+
+    return false;
+}
 
 }}} // namespace mlabs::balai::video

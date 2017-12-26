@@ -1000,8 +1000,8 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
         if (2==utf_chars) {
             sub.BufferSize = sub.BufferSize & ~1;
             if (big_endian) {
-                uint8* ptr = sub.Buffer;
                 uint8 t;
+                ptr = sub.Buffer;
                 for (int i=0; i<sub.BufferSize; i+=2) {
                     t = ptr[0];
                     ptr[0] = ptr[1];
@@ -1037,23 +1037,23 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
             // translate to utf8, or failed.
             uint8* utf8 = NULL;
             int    utf8_len = 0;
-            uint8 const* ptr = sub.Buffer;
+            uint8 const* cptr = sub.Buffer;
             uint8 const* const ptr_end = sub.Buffer + sub.BufferSize;
             if (big_endian) {
                 struct UTF32BE {
-                    static uint32 cp(uint8 const* ptr) {
-                        return (uint32(ptr[0])<<24) | (uint32(ptr[1])<<16) | (uint32(ptr[2])<<8) | uint32(ptr[3]);
+                    static uint32 cp(uint8 const* cptr) {
+                        return (uint32(cptr[0])<<24) | (uint32(cptr[1])<<16) | (uint32(cptr[2])<<8) | uint32(cptr[3]);
                     }
                 };
-                int const len = GetUTF32toUTF8Size<UTF32BE>(ptr, ptr_end);
-                if (len>0 && ptr==ptr_end) {
-                    uint8* utf8 = (uint8*) malloc(len+1);
+                int const len = GetUTF32toUTF8Size<UTF32BE>(cptr, ptr_end);
+                if (len>0 && cptr==ptr_end) {
+                    utf8 = (uint8*) malloc(len+1);
                     if (NULL!=utf8) {
-                        ptr = sub.Buffer;
+                        cptr = sub.Buffer;
                         uint8* dst = utf8;
                         uint8* const dst_end = dst + len;
-                        int const len2 = ConvertUTF32toUTF8<UTF32BE>(dst, dst_end, ptr, ptr_end);
-                        if (len2==len && dst==dst_end && ptr==ptr_end) {
+                        int const len2 = ConvertUTF32toUTF8<UTF32BE>(dst, dst_end, cptr, ptr_end);
+                        if (len2==len && dst==dst_end && cptr==ptr_end) {
                             utf8[len] = '\0';
                             utf8_len = len;
                         }
@@ -1066,19 +1066,19 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
             }
             else {
                 struct UTF32LE {
-                    static uint32 cp(uint8 const* ptr) {
-                        return (uint32(ptr[3])<<24) | (uint32(ptr[2])<<16) | (uint32(ptr[1])<<8) | uint32(ptr[0]);
+                    static uint32 cp(uint8 const* cptr) {
+                        return (uint32(cptr[3])<<24) | (uint32(cptr[2])<<16) | (uint32(cptr[1])<<8) | uint32(cptr[0]);
                     }
                 };
-                int const len = GetUTF32toUTF8Size<UTF32LE>(ptr, ptr_end);
-                if (len>0 && ptr==ptr_end) {
-                    uint8* utf8 = (uint8*) malloc(len+1);
+                int const len = GetUTF32toUTF8Size<UTF32LE>(cptr, ptr_end);
+                if (len>0 && cptr==ptr_end) {
+                    utf8 = (uint8*) malloc(len+1);
                     if (NULL!=utf8) {
-                        ptr = sub.Buffer;
+                        cptr = sub.Buffer;
                         uint8* dst = utf8;
                         uint8* const dst_end = dst + len;
-                        int const len2 = ConvertUTF32toUTF8<UTF32LE>(dst, dst_end, ptr, ptr_end);
-                        if (len2==len && dst==dst_end && ptr==ptr_end) {
+                        int const len2 = ConvertUTF32toUTF8<UTF32LE>(dst, dst_end, cptr, ptr_end);
+                        if (len2==len && dst==dst_end && cptr==ptr_end) {
                             utf8[len] = '\0';
                             utf8_len = len;
                         }
@@ -1233,7 +1233,7 @@ bool Subtitle::AddSubtitleStream_(wchar_t const* filename, FORMAT format)
                     MAPPING_PROPERTY_BAG bag;
                     memset(&bag, 0 , sizeof(bag));
                     bag.Size = sizeof(bag);
-                    HRESULT hr = MappingRecognizeText(pService, wtext, len, 0, nullptr, &bag);
+                    hr = MappingRecognizeText(pService, wtext, len, 0, nullptr, &bag);
                     if (SUCCEEDED(hr) && bag.prgResultRanges && bag.prgResultRanges[0].pData) {
                         //BL_LOG("Service: %ws, category: %ws\n", pService[0].pszDescription, pService[0].pszCategory);
                         // Service: Microsoft Language Detection, category: Language Detection
@@ -1837,8 +1837,8 @@ int Subtitle::SRT_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
             if ((movieResX_*9)>(movieResY_*16))
                 display_height = display_height*(movieResX_*9)/(movieResY_*16);
 
-            char const* s = pg->text;
             char const* const text_end = pg->text + pg->length;
+            s = pg->text;
             while (s<text_end && num_rects<max_rects) {
                 if (*s=='\n') {
                     display_left = 0;
@@ -3164,8 +3164,8 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
             int const default_display_size = (style.Fontsize*corrected_PlayResY/playResY_)*font_size_adj_num/font_size_adj_den;
 
             int const dist_border_size = textBlitter_.GetDistanceMapSafeBorder(TEXT_FONT_PYRAMID);
-            char const* s = pg->text;
             char const* const text_end = pg->text + pg->length;
+            s = pg->text;
             while (s<text_end && num_rects<max_rects) {
                 if (*s=='\n') {
                     display_left = 0;
@@ -3180,7 +3180,7 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
                     continue;
                 }
 
-                char const* e = s;
+                e = s;
                 while (e<text_end && *e!='\n') ++e;
                 wchar_t const* const wptr_end = wptr + MultiByteToWideChar(CP_UTF8, 0, s, (int) (e-s), wptr, (int)(wtext_buffer_end-wptr));
                 if (wptr<wptr_end) {
@@ -3254,8 +3254,8 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
                                 t1 = -1;
                                 v1 = pg->fs;
                                 total_keys = 0;
-                                for (int i=0; i<as.fs.nKeys && total_keys<SubtitleRect::ANIMATION_BUFFER_SIZE; ++i) {
-                                    int const id = as.fs.KeyIds[i];
+                                for (int j=0; j<as.fs.nKeys&&total_keys<SubtitleRect::ANIMATION_BUFFER_SIZE; ++j) {
+                                    int const id = as.fs.KeyIds[j];
                                     assert(id<as.nKeys);
                                     if (id<as.nKeys) {
                                         AnimationSet::AnimationKey const& k = as.Keys[id];
@@ -3282,8 +3282,8 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
                                 t1 = -1;
                                 v1 = (int) (100.0f*pg->frz);
                                 total_keys = 0;
-                                for (int i=0; i<as.fr.nKeys && total_keys<SubtitleRect::ANIMATION_BUFFER_SIZE; ++i) {
-                                    int const id = as.fr.KeyIds[i];
+                                for (int j=0; j<as.fr.nKeys && total_keys<SubtitleRect::ANIMATION_BUFFER_SIZE; ++j) {
+                                    int const id = as.fr.KeyIds[j];
                                     assert(id<as.nKeys);
                                     if (id<as.nKeys) {
                                         AnimationSet::AnimationKey const& k = as.Keys[id];

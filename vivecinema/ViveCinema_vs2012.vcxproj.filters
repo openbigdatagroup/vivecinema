@@ -1,0 +1,66 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="Ambisonics.cpp" />
+    <ClCompile Include="Audio.cpp" />
+    <ClCompile Include="AVDecoder.cpp" />
+    <ClCompile Include="HRTFs.cpp" />
+    <ClCompile Include="ISO639.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="SDLAudio.cpp" />
+    <ClCompile Include="Subtitle.cpp" />
+    <ClCompile Include="VRVideoMetadata.cpp" />
+    <ClCompile Include="VRVideoPlayer.cpp" />
+    <ClCompile Include="Win32Font.cpp" />
+    <ClCompile Include="..\third_party\AMF\amf\public\common\AMFFactory.cpp">
+      <Filter>AMF</Filter>
+    </ClCompile>
+    <ClCompile Include="..\third_party\AMF\amf\public\common\Windows\ThreadWindows.cpp">
+      <Filter>AMF</Filter>
+    </ClCompile>
+    <ClCompile Include="..\third_party\NVDEC\Samples\common\src\dynlink_cuda.cpp">
+      <Filter>NVDEC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\third_party\NVDEC\Samples\common\src\dynlink_nvcuvid.cpp">
+      <Filter>NVDEC</Filter>
+    </ClCompile>
+    <ClCompile Include="HWAccelDecoder.cpp" />
+    <ClCompile Include="VideoTexture.cpp" />
+    <ClCompile Include="VRVideoDashboard.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Audio.h" />
+    <ClInclude Include="AVDecoder.h" />
+    <ClInclude Include="ISO639.h" />
+    <ClInclude Include="Subtitle.h" />
+    <ClInclude Include="SystemFont.h" />
+    <ClInclude Include="VRVideoPlayer.h" />
+    <ClInclude Include="win32_helper.h" />
+    <ClInclude Include="HWAccelDecoder.h" />
+    <ClInclude Include="VideoTexture.h" />
+    <ClInclude Include="resource.h">
+      <Filter>resource</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="resource">
+      <UniqueIdentifier>{85da61a9-b8a1-47e1-8aa3-395d44851bc5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AMF">
+      <UniqueIdentifier>{20aad052-88a1-4394-ad0a-aff42940c7b0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NVDEC">
+      <UniqueIdentifier>{593706cb-b1a4-4a25-8257-92a8ecd2bdde}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="vive.ico">
+      <Filter>resource</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="ViveCinema_vs2012.rc">
+      <Filter>resource</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+</Project>

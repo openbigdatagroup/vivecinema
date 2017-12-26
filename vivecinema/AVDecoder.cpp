@@ -616,7 +616,7 @@ char const* VideoDecoder::Name() const
     return "FFmpeg (CPU)";
 }
 //---------------------------------------------------------------------------------------
-bool VideoDecoder::Init(AVStream* stream, int w, int h, uint8& options)
+bool VideoDecoder::Init(AVStream* stream, int w, int h, uint8 options)
 {
     assert(stream);
     assert(w>0 && h>0 && 0==(w&1) && 0==(1&h));
@@ -653,19 +653,11 @@ bool VideoDecoder::Init(AVStream* stream, int w, int h, uint8& options)
             }
             else {
                 flags_ = 0;
-                if (1==options) {
-                    options = 0;
-                }
             }
 
             uint32 hw_flags = 0;
             AVCodec const* codec = NULL;
             avctx_hwaccel_ = ffmpegInitializer.GetHWAccelType(codec, hw_flags, codec_id, options>2 ? int(options-2):-1);
-            if (AV_HWDEVICE_TYPE_NONE==avctx_hwaccel_) {
-                if (options>2)
-                    options = 0;
-            }
-
             if (NULL==codec) {
                 codec = avcodec_find_decoder(codec_id);
                 if (NULL==codec) {
@@ -677,7 +669,6 @@ bool VideoDecoder::Init(AVStream* stream, int w, int h, uint8& options)
             if (NULL==avctx_) {
                 return (NULL!=pImp_);
             }
-
 
             if (0<=avcodec_parameters_to_context(avctx_, codecpar)) {
                 avctx_->opaque = this;
@@ -750,9 +741,7 @@ bool VideoDecoder::Init(AVStream* stream, int w, int h, uint8& options)
             flags_ |= (uint32(hw_flags<<2) | 1);
 
 #ifdef BL_AVDECODER_VERBOSE
-            if (NULL!=pImp_) {
-                BL_LOG("** video decoder : %s\n", pImp_->Name());
-            }
+            BL_LOG("** video decoder : %s\n", (NULL!=pImp_) ? pImp_->Name():"FFmpeg Software");
 #endif
         }
 
@@ -945,15 +934,40 @@ bool VideoDecoder::send_packet(AVPacket const& pkt)
     return true; // bypass this packet
 }
 //---------------------------------------------------------------------------------------
-bool VideoDecoder::receive_frame(uint8_t* nv12, int width, int height)
+bool VideoDecoder::receive_frame(VideoFrame& output)
 {
+    // color space and range
+    if (avctx_) {
+        //
+        // color space, check...
+        // enum AVColorTransferCharacteristic avctx_->color_trc;
+        // enum AVColorPrimaries              avctx_->color_primaries
+        // enum AVColorSpace                  avctx_->colorspace;
+        //
+        // also check same members from AVFrame...
+        //
+
+        //
+        // color range
+        if (AVCOL_RANGE_JPEG==avctx_->color_range) {
+            output.ColorRange = VideoFrame::RANGE_JPEG;
+        }
+        else {
+            output.ColorRange = VideoFrame::RANGE_MPEG;
+        }
+    }
+
     if (NULL!=pImp_) {
-        if (pImp_->receive_frame(nv12, width, height)) {
+        if (pImp_->receive_frame(output)) {
             ++frame_cnt_;
             return true;
         }
     }
     else if (NULL!=avctx_ && AV_PIX_FMT_NONE!=frame_.format) {
+        uint8_t* nv12 = (uint8_t*) output.FramePtr;
+        int const width  = output.Width;
+        int const height = output.Height;
+
         AVFrame sw_frame;
         AVFrame* frame = NULL;
         if (frame_.hw_frames_ctx) {
@@ -1092,7 +1106,14 @@ bool VideoDecoder::discard_frame()
     }
     return false;
 }
-
+//---------------------------------------------------------------------------------------
+bool VideoDecoder::finish_frame(VideoFrame& frame)
+{
+    if (pImp_) {
+        pImp_->finish_frame(frame);
+    }
+    return true;
+}
 //---------------------------------------------------------------------------------------
 AVDecoder::AVDecoder(IAVDecoderHost* listener, int id):
 videoQueue_(),subtitleQueue_(),audioQueue_(),
@@ -1167,8 +1188,6 @@ interruptRequest_(0)
     for (int i=0; i<Subtitle::MAX_NUM_SUBTITLE_RECTS; ++i) {
         subtitleRects_[i].Reset();
     }
-
-    memset(videoFramePTS_, 0, sizeof(videoFramePTS_));
 
     // default size = NUM_VIDEO_BUFFER_FRAMES*24MB = 48MB
     videoBufferSize_ = NUM_VIDEO_BUFFER_FRAMES*av_image_get_buffer_size(AV_PIX_FMT_NV12, 4096, 4096, 4);
@@ -1463,11 +1482,9 @@ bool AVDecoder::DoOpen_(AVFormatContext* fmtCtx,  char const* url, VideoOpenOpti
 
         // video decoder
         if (0xff==videoDecoderPreference_) {
+            videoDecoderPreference_ = 0;
             if (1<hwaccel::GPUAccelScore()) {
                 videoDecoderPreference_ = 1; // GPU
-            }
-            else {
-                videoDecoderPreference_ = 0;
             }
         }
         videoDecoder_.Init(stream, videoWidth_, videoHeight_, videoDecoderPreference_);
@@ -2312,8 +2329,18 @@ bool AVDecoder::VideoThread_()
                 consecutive_drop_frames>max_consecutive_drop_frames ||
                 (consecutive_drop_frames>4 && (0==frame_buffer_count))) {
                 int const slot = videoFramePut_%NUM_VIDEO_BUFFER_FRAMES;
-                videoDecoder_.receive_frame(videoBuffer_+slot*videoFrameDataSize_, videoWidth_, videoHeight_);
-                videoFramePTS_[slot] = videoPutPTS_;
+
+                VideoFrame& frame = decodedFrames_[slot];
+                frame.FramePtr   = (int64_t) (videoBuffer_+slot*videoFrameDataSize_);
+                frame.PTS        = videoPutPTS_;
+                frame.Type       = VideoFrame::NV12;
+                frame.ColorSpace = VideoFrame::BT_709;
+                frame.ColorRange = VideoFrame::RANGE_MPEG;
+                frame.Width      = videoWidth_;
+                frame.Height     = videoHeight_;
+                frame.ID         = videoFramePut_;
+                videoDecoder_.receive_frame(frame);
+
                 ++videoFramePut_;
                 consecutive_drop_frames = 0;
             }
@@ -3089,7 +3116,7 @@ bool AVDecoder::AudioSubtitleThread_()
                     // refined with actual video frame timestamp. Note video pts
                     // resolution is relative low to audio. Actual difference
                     // could still be as big as 1000000/29.97 ~= 33366.7 us
-                    pts1 = videoFramePTS_[0]; 
+                    pts1 = decodedFrames_[0].PTS;
                     break;
                 }
             }
@@ -3675,7 +3702,7 @@ bool AVDecoder::AudioSubtitleThread_()
                                 if (0<=audioStreamIndex_)
                                     subtitlePTS_ += audioGetPTS_;
                                 else
-                                    subtitlePTS_ += videoFramePTS_[videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES];
+                                    subtitlePTS_ += decodedFrames_[videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES].PTS;
                             }
 
                             int const sub_duration = (int) sub.end_display_time - (int) sub.start_display_time;
@@ -3924,20 +3951,40 @@ void AVDecoder::MainThread_()
             int64_t const pts_diff_threshold = pts_frame<100000 ? 100000:pts_frame;
             bool kickoff = true;
             if (video_stream && audio_stream && audioGetPTS_<audioPutPTS_) {    
-                int64_t const pts_diff = audioGetPTS_ - videoFramePTS_[0];
+                int64_t const pts_diff = audioGetPTS_ - decodedFrames_[0].PTS;
                 if (pts_diff>pts_diff_threshold) {
                     // discard video frames
                     // frame_buffer_count>=NUM_VIDEO_BUFFER_FRAMES make video decoding thread be hold.
                     // so it's safe to remove some video frames. (if we set videoFramePTS_ last)
                     int overdues = 0;
-                    while (overdues<NUM_VIDEO_BUFFER_FRAMES && videoFramePTS_[overdues]<audioGetPTS_)
+                    while (overdues<NUM_VIDEO_BUFFER_FRAMES && decodedFrames_[overdues].PTS<audioGetPTS_) {
+                        videoDecoder_.finish_frame(decodedFrames_[overdues]);
                         ++overdues;
+                    }
 
                     int new_put = 0;
                     if (overdues<videoFramePut_) {
                         new_put = videoFramePut_ - overdues;
-                        memmove(videoBuffer_, videoBuffer_+overdues*videoFrameDataSize_, new_put*videoFrameDataSize_);
-                        memmove(videoFramePTS_, videoFramePTS_+overdues, new_put*sizeof(videoFramePTS_[0]));
+                        for (int i=0; i<new_put; ++i) {
+                            VideoFrame& dst = decodedFrames_[i];
+                            VideoFrame& src = decodedFrames_[i+overdues];
+
+                            if (VideoFrame::NV12_HOST==src.Type) {
+                                assert(VideoFrame::NV12_HOST==dst.Type);
+                                memmove((void*)dst.FramePtr, (void*)src.FramePtr, videoFrameDataSize_);
+                            }
+                            else {
+                                dst.FramePtr = src.FramePtr; // this could be wrong!?
+                            }
+
+                            dst.PTS        = src.PTS;
+                            dst.Type       = src.Type;
+                            dst.ColorSpace = src.ColorSpace;
+                            dst.ColorRange = src.ColorRange;
+                            dst.Width      = src.Width;
+                            dst.Height     = src.Height;
+                            dst.ID         = src.ID;
+                        }
                     }
                     videoFramePut_ = new_put;
 
@@ -3947,7 +3994,7 @@ void AVDecoder::MainThread_()
                     std::lock_guard<std::mutex> lock(audioMutex_); // discard audio data
                     assert(0==audioBufferGet_);
                     audioBufferGet_ = 0;
-                    if (audioPutPTS_<=videoFramePTS_[0]) {
+                    if (audioPutPTS_<=decodedFrames_[0].PTS) {
                         audioGetPTS_ = audioPutPTS_;
                         audioBufferPut_ = 0;
                     }
@@ -3955,7 +4002,7 @@ void AVDecoder::MainThread_()
                         int const discard_bytes = (int) ((av_rescale(-pts_diff, audioBytesPerSecond_, AV_TIME_BASE)/audioBytesPerFrame_)*audioBytesPerFrame_);
                         if (discard_bytes<audioBufferPut_) {
                             memmove(audioBuffer_, audioBuffer_+discard_bytes, (int)audioBufferPut_-discard_bytes);
-                            audioGetPTS_ = videoFramePTS_[0];
+                            audioGetPTS_ = decodedFrames_[0].PTS;
                         }
                         else {
                             audioGetPTS_ = audioPutPTS_;
@@ -3970,7 +4017,7 @@ void AVDecoder::MainThread_()
             if (kickoff) {
                 int toStart = 0;
                 if (NULL!=host_) {
-                    int const ts = (int) (((video_stream ? videoFramePTS_[0]:audioGetPTS_) - startTime_)/1000);
+                    int const ts = (int) (((video_stream ? decodedFrames_[0].PTS:audioGetPTS_) - startTime_)/1000);
                     int const dur = (int)(duration_/1000);
 
                     // prepare start, play music...
@@ -3995,7 +4042,7 @@ void AVDecoder::MainThread_()
                 }
 
 #ifdef BL_AVDECODER_VERBOSE
-                int vPTS = (int) ((videoFramePTS_[0]-startTime_)/1000);
+                int vPTS = (int) ((decodedFrames_[0].PTS-startTime_)/1000);
                 if (vPTS<0) vPTS = 0;
                 int const ms = vPTS%1000;
                 int ss = vPTS/1000;
@@ -4009,10 +4056,10 @@ void AVDecoder::MainThread_()
                         int mm1 = ss1/60; ss1 %= 60;
                         int hh1 = mm1/60; mm1 %= 60;
 
-                        int64_t const diff = audioGetPTS_-videoFramePTS_[0];
+                        int64_t const diff = audioGetPTS_-decodedFrames_[0].PTS;
                         BL_LOG("** start play audioPTS=%d:%02d:%02d:%03d(%dms %dbytes)  videoPTS=%d:%02d:%02d:%03d(%d frames)  dPTS=%+llims%s\n",
-                                hh1, mm1, ss1, ms1, (audioPutPTS_-audioGetPTS_)/1000, (int)audioBufferPut_-(int)audioBufferGet_,
-                                hh, mm, ss, ms, (int)videoFramePut_-(int)videoFrameGet_, diff/1000, (diff>pts_diff_threshold) ? "!!!":"");
+                                hh1, mm1, ss1, ms1, int(audioPutPTS_-audioGetPTS_)/1000, (int)audioBufferPut_-(int)audioBufferGet_,
+                                hh, mm, ss, ms, (int)videoFramePut_-(int)videoFrameGet_, diff/1000, abs(diff>pts_diff_threshold) ? "!!!":"");
                     }
                     else {
                         BL_LOG("** start play videoPTS=%d:%02d:%02d:%03d(%d frames), no audio data loaded.\n",
@@ -4026,7 +4073,7 @@ void AVDecoder::MainThread_()
 #endif
                 // timeLastUpdateFrameSysTime_ may be 0, if UpdateFrame() havn't been called yet.
                 timeAudioCrossfade_ = timeLastUpdateFrameSysTime_ = av_gettime();
-                timeStartSysTime_ = timeAudioCrossfade_ - videoFramePTS_[0]; // play!
+                timeStartSysTime_ = timeAudioCrossfade_ - decodedFrames_[0].PTS; // play!
                 if (toStart<0) {
                     FlushQueue_(audioQueue_);
                     break;
@@ -4214,11 +4261,11 @@ void AVDecoder::MainThread_()
 
                     if (videoFramePut_>0) {
                         if (NULL!=host_) {
-                            host_->OnStart(id_, (int)((videoFramePTS_[0]-startTime_)/1000),
-                                                (int)((videoFramePTS_[(videoFramePut_-1)%NUM_VIDEO_BUFFER_FRAMES]-startTime_)/1000), true, false);
+                            host_->OnStart(id_, (int)((decodedFrames_[0].PTS-startTime_)/1000),
+                                                (int)((decodedFrames_[(videoFramePut_-1)%NUM_VIDEO_BUFFER_FRAMES].PTS-startTime_)/1000), true, false);
                         }
                         timeAudioCrossfade_ = timeLastUpdateFrameSysTime_ = av_gettime();
-                        timeStartSysTime_ = timeAudioCrossfade_ - videoFramePTS_[0];
+                        timeStartSysTime_ = timeAudioCrossfade_ - decodedFrames_[0].PTS;
                     }
                     else {
                         FlushQueue_(videoQueue_);
@@ -4447,8 +4494,8 @@ void AVDecoder::SeekThread_()
             if (packet.stream_index==videoStreamIndex_) {
                 if (videoDecoder_.send_packet(packet) &&
                     videoDecoder_.can_receive_frame(frame_pts, frame_duration)) {
-                    int const slot = videoFramePut_%NUM_VIDEO_BUFFER_FRAMES;
-                    videoDecoder_.receive_frame(videoBuffer_+slot*videoFrameDataSize_, videoWidth_, videoHeight_);
+                    
+                    
 
                     // timestamp
                     if (AV_NOPTS_VALUE!=frame_pts) {
@@ -4465,7 +4512,17 @@ void AVDecoder::SeekThread_()
                         videoPutPTS_ = seek_pts;
                     }
 
-                    videoFramePTS_[slot] = videoPutPTS_;
+                    int const slot = videoFramePut_%NUM_VIDEO_BUFFER_FRAMES;
+                    VideoFrame& frame = decodedFrames_[slot];
+                    frame.FramePtr   = (int64_t) (videoBuffer_+slot*videoFrameDataSize_);
+                    frame.PTS        = videoPutPTS_;
+                    frame.Type       = VideoFrame::NV12;
+                    frame.ColorSpace = VideoFrame::BT_709;
+                    frame.ColorRange = VideoFrame::RANGE_MPEG;
+                    frame.Width      = videoWidth_;
+                    frame.Height     = videoHeight_;
+                    frame.ID         = videoFramePut_;
+                    videoDecoder_.receive_frame(frame);
                     ++videoFramePut_;
 
                     // estimate next frame's pts
@@ -4580,14 +4637,15 @@ bool AVDecoder::UpdateFrame()
                 int64_t const app_half_frametime = 5000;
                 int64_t const video_pts = cur_time - timeStartSysTime_;
                 int slot = videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES;
-                if (videoFramePTS_[slot]<=(video_pts+app_half_frametime)) {
+                if (decodedFrames_[slot].PTS<=(video_pts+app_half_frametime)) {
                     video_update = true;
                     //
                     // to prevent image overwrite, move videoFrameGet_ before host_->FrameUpdate() returned
                     //
                     int next_get = videoFrameGet_ + 1;
                     while (next_get<videoFramePut_ &&
-                           video_pts>=videoFramePTS_[next_get%NUM_VIDEO_BUFFER_FRAMES]) {
+                           video_pts>=decodedFrames_[next_get%NUM_VIDEO_BUFFER_FRAMES].PTS) {
+                        videoDecoder_.finish_frame(decodedFrames_[slot]);
                         slot = next_get%NUM_VIDEO_BUFFER_FRAMES;
                         ++next_get;
                     }
@@ -4598,11 +4656,12 @@ bool AVDecoder::UpdateFrame()
                     }
 #endif
                     if (NULL!=host_) {
-                        host_->FrameUpdate(id_,
-                                           videoBuffer_ + slot*videoFrameDataSize_,
-                                           next_get-1, videoWidth_, videoHeight_);
+                        host_->FrameUpdate(id_, decodedFrames_[slot]);
                     }
-                    videoGetPTS_ = videoFramePTS_[slot]; // + video frame duration?
+                    videoGetPTS_ = decodedFrames_[slot].PTS; // + video frame duration?
+
+                    // finish this frame
+                    videoDecoder_.finish_frame(decodedFrames_[slot]);
 
                     // only now you can move on videoFrameGet_
                     videoFrameGet_ = next_get;
@@ -4649,12 +4708,12 @@ bool AVDecoder::UpdateFrame()
     }
     else if (STATUS_SEEKING==status_) {
         if (videoFrameGet_<videoFramePut_) {
+            VideoFrame& frame = decodedFrames_[videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES];
             if (NULL!=host_) {
-                host_->FrameUpdate(id_,
-                                   videoBuffer_ + (videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES)*videoFrameDataSize_,
-                                   videoFrameGet_, videoWidth_, videoHeight_);
+                host_->FrameUpdate(id_, frame);
             }
-            videoGetPTS_ = videoFramePTS_[videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES];
+            videoGetPTS_ = frame.PTS;
+            videoDecoder_.finish_frame(frame);
             ++videoFrameGet_;
         }
     }

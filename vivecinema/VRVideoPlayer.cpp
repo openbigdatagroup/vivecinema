@@ -446,6 +446,7 @@ thumbnailMutex_(),
 publishingThumbnailId_(-1),
 thumbnail_filecache_(NULL),
 decoder_(this, 0),
+videoTexture_(),
 audioManager_(AudioManager::GetInstance()),
 masterVolume_(),
 fonts_(16),
@@ -458,7 +459,6 @@ subtitleFx_(NULL),subtitleFxCoeff_(NULL),subtitleFxShadowColor_(NULL),
 pan360_(NULL),pan360Crop_(NULL),pan360Diffuse_(NULL),pan360Map_(NULL),
 pan360NV12_(NULL),pan360NV12Crop_(NULL),pan360MapY_(NULL),pan360MapUV_(NULL),
 videoNV12_(NULL),videoMapY_(NULL),videoMapUV_(NULL),
-videoY_(NULL),videoUV_(NULL),
 subtitle_(NULL),
 uiGlyph_(NULL),
 background_(NULL),
@@ -560,9 +560,28 @@ bool VRVideoPlayer::Playback_(VideoTrack* track)
         current_track_->SetTimestamp(decoder_.Timestamp());
     }
 
+    // clear black
+    videoTexture_.ClearBlack();
+
 #if 1
     on_processing_time_start_ = (float) mlabs::balai::system::GetTime();
     on_processing_ = 0x1000;
+
+    //
+    // watch out for the std::async()...
+    // the temporary object (of type std::future<>) results from std::async() call will
+    // be destructed soon after std::async() returned. According to C++ standard,
+    // std::future<> destructor will block std::this_thread until task finished.
+    // Hence makes concurrency not as we expected.
+    //
+    // std::this_thread is our render thread. if it blocks too long, steam VR interrupts
+    // our rendering. (the result is  a short pause as user may experience)
+    //
+    // so if you're building vive cinema using later visual studios version, like 2015,
+    // 2017... use std::thread() here not std::async().
+    //
+    // For Fossil visual studio 2012, std::async() does work as i wish. -andre 2017.12.25
+    //
     std::async(std::launch::async, [this,track] {
         VideoOpenOption param;
         track->GetVideoParams(param);
@@ -1213,13 +1232,7 @@ bool VRVideoPlayer::Initialize()
     extSubtitleInfo_->SetFilterMode(FILTER_BILINEAR);
 
     // video texture, a pixel buffer object texture
-    videoY_ = Texture2D::New(0, true);
-    videoY_->SetAddressMode(ADDRESS_CLAMP, ADDRESS_CLAMP);
-    videoY_->SetFilterMode(FILTER_BILINEAR);
-    videoUV_ = Texture2D::New(0, true);
-    videoUV_->SetAddressMode(ADDRESS_CLAMP, ADDRESS_CLAMP);
-    videoUV_->SetFilterMode(FILTER_BILINEAR);
-    ClearVideoTexture_();
+    videoTexture_.Initialize();
 
     // subtitle
     subtitle_ = Texture2D::New(0, true);
@@ -1501,6 +1514,9 @@ void VRVideoPlayer::Finalize()
 
     decoder_.Close(); // good to be here!?
 
+    // relase video texture
+    videoTexture_.Finalize();
+    
     // hw context
     mlabs::balai::video::hwaccel::DeinitContext();
 
@@ -1513,8 +1529,6 @@ void VRVideoPlayer::Finalize()
     BL_SAFE_RELEASE(pan360_);
     BL_SAFE_RELEASE(pan360NV12_);
     BL_SAFE_RELEASE(videoNV12_);
-    BL_SAFE_RELEASE(videoY_);
-    BL_SAFE_RELEASE(videoUV_);
     BL_SAFE_RELEASE(subtitle_);
     BL_SAFE_RELEASE(uiGlyph_);
     BL_SAFE_RELEASE(background_);
@@ -1725,13 +1739,13 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
     memset(buffer, 0, font_texture_size*font_texture_size);
 
     uint8* ptr = buffer;
-    fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, wfullpath, (int)short_len);
-    TexCoord& tc = texcoords_[DRAW_TEXT_PUT_VIDEOS_IN_PATH];
-    tc.x0 = 0.0f;
-    tc.y0 = 0.0f;
-    tc.x1 = (float)(sx)/(float)font_texture_size;
-    tc.y1 = (float)(sy)/(float)font_texture_size;
-    ++text_count;
+    if (fontBlitter.DistanceMap(ptr, sx, sy, ix, iy, font_texture_size, UI_TEXT_FONT_PYRAMID, wfullpath, (int)short_len)) {
+        TexCoord& tc = texcoords_[DRAW_TEXT_PUT_VIDEOS_IN_PATH];
+        tc.x0 = tc.y0 = 0.0f;
+        tc.x1 = (float)(sx)/(float)font_texture_size;
+        tc.y1 = (float)(sy)/(float)font_texture_size;
+        ++text_count;
+    }
     int font_put_x = sx;
     int font_put_y = 0;
     int font_put_row = sy;
@@ -2205,6 +2219,7 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         }
 
         // text glyph
+        TexCoord tc;
         sx = font_texture_size - font_put_x;
         sy = font_texture_size - font_put_y;
         ptr = buffer + font_put_y*font_texture_size + font_put_x;
@@ -2554,7 +2569,7 @@ bool VRVideoPlayer::FrameMove()
         });
 
         // clear video texture
-        ClearVideoTexture_();
+        videoTexture_.Resize(decoder_.VideoWidth(), decoder_.VideoHeight());
 
         // build OpenGL vertex array
         int longi(0), lati_south(0), lati_north(0);
@@ -2590,7 +2605,7 @@ bool VRVideoPlayer::FrameMove()
     }
     else {
         // clear video texture
-        ClearVideoTexture_();
+        //videoTexture_.ClearBlack();
 
         if (0x1001==on_processing_) { // loading failed
             // next track failed, trigger another Next!?
@@ -3119,9 +3134,9 @@ bool VRVideoPlayer::FrameMove()
                                 }
 
                                 int current_id = -1;
-                                for (int i=0; i<total_videos; ++i) {
-                                    if (playList_[i]==current_track_) {
-                                        current_id = (i+1)%total_videos;
+                                for (int j=0; j<total_videos; ++j) {
+                                    if (playList_[j]==current_track_) {
+                                        current_id = (j+1)%total_videos;
                                         break;
                                     }
                                 }
@@ -3423,8 +3438,7 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
         // 360 video - NV12
         renderer.SetEffect(pan360NV12_);
         pan360NV12_->BindConstant(pan360NV12Crop_, crop_factor);
-        pan360NV12_->BindSampler(pan360MapY_, videoY_);
-        pan360NV12_->BindSampler(pan360MapUV_, videoUV_);
+        videoTexture_.Bind(pan360NV12_, pan360MapY_, pan360MapUV_);
         renderer.CommitChanges();
 
         int longi, lati_south, lati_north;
@@ -3501,8 +3515,7 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
         }
 
         renderer.SetEffect(videoNV12_);
-        videoNV12_->BindSampler(videoMapY_, videoY_);
-        videoNV12_->BindSampler(videoMapUV_, videoUV_);
+        videoTexture_.Bind(videoNV12_, videoMapY_, pan360MapUV_);
         prim.BeginDraw(GFXPT_QUADLIST);
             prim.AddVertex(-dw, 0.0f, dh, s0, t0);
             prim.AddVertex(-dw, 0.0f, -dh, s0, t1);

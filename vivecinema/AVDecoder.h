@@ -72,6 +72,65 @@ enum VIDEO_3D {
     VIDEO_3D_RIGHTLEFT = 4, // Matroska::StereoMode = 11
 };
 
+//
+// video buffer - NV12 (12bpp)
+// 4K UHD (3840x2160*3/2=12150 KB; 3840x3840*3/2=21600 KB; 4096x4096*3/2=24 MB)
+// 8K UHD (7680x4320*3/2=48600 KB)
+//
+// since the bottleneck, avcodec_decode_video2(), sometimes may take 200ms,
+// set to 8 to avoid frame lag(30fps*200ms/1000ms = 6 frames).
+// but it also needs lots of memory - 192 MB for 4096x4096 or 380MB for 7680x4320
+// 8/120=66.7ms(!), 8/60=133ms, 8/30=266ms, 8/24=333ms
+#define NUM_VIDEO_BUFFER_FRAMES (8) 
+
+//
+// decoded video frame. application should not modified all values
+struct VideoFrame {
+    enum TYPE {
+        NV12,
+        NV12_HOST = NV12, // host(system) memory
+        NV12_CUDA,        // CUDA device (GPU) memory
+        //
+        // more to come...
+        //
+    };
+
+    // check FFmpeg's enum AVColorSpace; codecpar->color_space
+    enum COLOR_SPACE {
+        BT_601,
+        BT_709,  // RANGE_MPEG
+        BT_2020,
+        BT_2100, // BT.2020 + HDR
+        //
+        // more to come...
+        //
+    };
+
+    // check FFmpeg's enum AVColorRange; codecpar->color_range
+    // google - "Full Swing", "Studio Swing"
+    enum COLOR_RANGE {
+        RANGE_MPEG, // "MPEG" YUV ranges, 219*2^(n-8), 8-bit:[16, 235], 10-bit:[64, 940]
+        RANGE_JPEG  // "JPEG" YUV ranges, e.g. YUVJ420
+    };
+
+    int64_t     FramePtr;   // point to frame bytes with respect to Type
+    int64_t     PTS;        // in microseconds
+    TYPE        Type;       // FramePtr type
+    COLOR_SPACE ColorSpace; // to be implemented
+    COLOR_RANGE ColorRange; // to be implemented
+    int         Width;      // frame width
+    int         Height;     // frame height
+    int         ID;         // frame S/N number
+    VideoFrame() { Reset(); }
+    void Reset() {
+        FramePtr   = PTS = 0;
+        Type       = NV12;
+        ColorSpace = BT_709;
+        ColorRange = RANGE_MPEG;
+        Width = Height = ID = 0;
+    }
+};
+
 // video decoder context
 // As you may experience, to open and close video context for every playback may
 // lose couple of video frames. in serious case, > 10+ seconds.
@@ -115,7 +174,7 @@ public:
     }
     char const* Name() const;
 
-    bool Init(AVStream* stream, int w, int h, uint8& options);
+    bool Init(AVStream* stream, int w, int h, uint8 options);
     void Clear();
 
     bool Resume(); // get ready to accept packet
@@ -135,10 +194,13 @@ public:
     bool send_packet(AVPacket const& pkt);
 
     // to receive frame in NV12 format, it may take some time
-    bool receive_frame(uint8_t* nv12, int width, int height);
+    bool receive_frame(VideoFrame& frame);
 
     // discard frames, all or one, must take less or equal time compare to receive_frame()
     bool discard_frame();
+
+    // this frame is presented
+    bool finish_frame(VideoFrame& frame);
 };
 
 // audio info
@@ -243,7 +305,7 @@ protected:
 
 public:
     // [render thread/callback] video frame update
-    virtual bool FrameUpdate(int decoder_id, void const* nv12, int frameId, int w, int h) = 0;
+    virtual bool FrameUpdate(int decoder_id, VideoFrame const& frame) = 0;
 
     // [render thread/callback] subtitle timing/texture update
     // channels = 1(U8, softsub) or 4(RGBA, hardsub)
@@ -305,16 +367,6 @@ class AVDecoder
         // Likely the reading file time. For video, 1 packet <= 1 frame.
         NUM_VIDEO_BUFFER_PACKETS = 8,
         NUM_AUDIO_BUFFER_PACKETS = 12,
-
-        //
-        // video buffer - NV12 (12bpp)
-        // 4K UHD (3840x2160*3/2=12150 KB; 3840x3840*3/2=21600 KB; 4096x4096*3/2=24 MB)
-        // 8K UHD (7680x4320*3/2=48600 KB)
-        //
-        // since the bottleneck, avcodec_decode_video2(), sometimes may take 200ms,
-        // set to 8 to avoid frame lag(30fps*200ms/1000ms = 6 frames).
-        // but it also needs lots of memory - 192 MB for 4096x4096 or 380MB for 7680x4320
-        NUM_VIDEO_BUFFER_FRAMES = 8, // 8/120=66.7ms(!), 8/60=133ms, 8/30=266ms, 8/24=333ms
     };
 
     class PacketQueue {
@@ -389,6 +441,7 @@ class AVDecoder
     //
     AVPacketList     avPackets_[NUM_MAX_TOTAL_PACKETS];
     SubtitleRect     subtitleRects_[Subtitle::MAX_NUM_SUBTITLE_RECTS];
+    VideoFrame       decodedFrames_[NUM_VIDEO_BUFFER_FRAMES];
     PacketQueue      videoQueue_;
     PacketQueue      subtitleQueue_;
     PacketQueue      audioQueue_;
@@ -411,7 +464,6 @@ class AVDecoder
     std::atomic<int> subtitleGet_;
     std::atomic<int> audioBufferPut_;
     std::atomic<int> audioBufferGet_;
-    int64_t          videoFramePTS_[NUM_VIDEO_BUFFER_FRAMES]; // must be microseconds
     IAVDecoderHost*  host_;     // decoder's owner/host
     IInputStream*    inputStream_;
     AVPacketList*    avPacketFreeList_;
@@ -802,9 +854,8 @@ public:
     // audio thread as soon as video Open() successfully.
     bool ConfirmAudioSetting();
 
-    // it must be called repeatly and it may trigger
+    // [render thread] must be called repeatly and it may trigger
     // host_->FrameUpdate() and/or host_->SubtitleUpdate() to update texture.
-    // so we really need it to be called in render thread.
     bool UpdateFrame();
 
     // stream out audio data

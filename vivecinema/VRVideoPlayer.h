@@ -31,10 +31,11 @@
 #define VR_VIDEOPLAYER_H
 
 #include "AVDecoder.h"
+#include "VideoTexture.h"
 
 #include "BLVR.h"
+
 #include "BLGLShader.h"
-#include "BLOpenGL.h"
 #include "BLColor.h"
 #include "BLStringPool.h"
 
@@ -811,6 +812,9 @@ class VRVideoPlayer : public IAVDecoderHost
     // video decoder
     AVDecoder decoder_;
 
+    // video texture
+    VideoTexture videoTexture_;
+
     // audio manager
     AudioManager& audioManager_;
 
@@ -872,8 +876,6 @@ class VRVideoPlayer : public IAVDecoderHost
     mlabs::balai::graphics::ShaderEffect* videoNV12_;
     mlabs::balai::graphics::shader::Sampler const* videoMapY_;
     mlabs::balai::graphics::shader::Sampler const* videoMapUV_;
-    mlabs::balai::graphics::Texture2D* videoY_;
-    mlabs::balai::graphics::Texture2D* videoUV_;
     mlabs::balai::graphics::Texture2D* subtitle_;
     mlabs::balai::graphics::Texture2D* uiGlyph_;
     mlabs::balai::graphics::ITexture*  background_;
@@ -1064,21 +1066,6 @@ class VRVideoPlayer : public IAVDecoderHost
             }
         }
         return -1;
-    }
-
-    // [render thread] clear video texture...
-    void ClearVideoTexture_() {
-        if (videoY_ && videoUV_) {
-            // black pixel : Y=0, U=128 V=128(Y=U=V=0 is greenish color)
-            // (size doesn't matter)
-            uint16 const w = 1280;
-            uint16 const h = 720;
-            uint8 blackYUV[w*h];
-            memset(blackYUV, 0x10, w*h); // Rec/BT.709  Y:[16, 235]
-            videoY_->UpdateImage(w, h, mlabs::balai::graphics::FORMAT_I8, blackYUV);
-            memset(blackYUV, 0x80, w*h/2);
-            videoUV_->UpdateImage(w/2, h/2, mlabs::balai::graphics::FORMAT_IA8, blackYUV);
-        }
     }
 
     // VR interrupt handler
@@ -1391,17 +1378,8 @@ public:
     bool Render(mlabs::balai::VR::HMD_EYE eye) const;
 
     // IAVDecoderHost overwrite
-    bool FrameUpdate(int /*decoder_id*/, void const* nv12, int /*frameId*/, int w, int h) {
-        if (NULL!=nv12 && NULL!=videoY_ && NULL!=videoUV_ && w>1 && h>1) {
-            //
-            // TO-DO : for spherical videos, we can still update only subrect if viewing angle is known...
-            //
-            videoY_->UpdateImage((uint16)w, (uint16)h, mlabs::balai::graphics::FORMAT_I8, nv12);
-            videoUV_->UpdateImage((uint16)w/2, (uint16)h/2, mlabs::balai::graphics::FORMAT_IA8,
-                                  ((uint8 const*)nv12)+w*h);
-            return true;
-        }
-        return false;
+    bool FrameUpdate(int /*decoder_id*/, VideoFrame const& frame) {
+        return videoTexture_.Update(frame);
     }
     bool SubtitleUpdate(int /*decoder_id*/,
                         void const* pixels, int w, int h, int channels,

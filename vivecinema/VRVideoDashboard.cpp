@@ -30,8 +30,6 @@
 #include "VRVideoPlayer.h"
 #include "BLPrimitives.h"
 
-//#include "BLJPEG.h"
-
 using namespace mlabs::balai::math;
 using namespace mlabs::balai::graphics;
 
@@ -290,14 +288,13 @@ void VRVideoPlayer::DrawSubtitle_(mlabs::balai::math::Matrix3 const& xform, int 
                                     0.0f,
                                     screen.z0 - screen.Height()*yOrg/rect.PlayResY);
 
-                    Matrix3 xform(o.x, o.y, o.z);
-                    xform.SetEulerAngles(pitch, roll, yaw);
-
+                    Matrix3 rot(o.x, o.y, o.z);
+                    rot.SetEulerAngles(pitch, roll, yaw);
+                    par.v0 = rot.PointTransform(Vector3(ll, y0, tt)-o);
+                    par.v1 = rot.PointTransform(Vector3(ll, y0, bb)-o);
+                    par.v2 = rot.PointTransform(Vector3(rr, y0, bb)-o);
+                    par.v3 = rot.PointTransform(Vector3(rr, y0, tt)-o);
                     par.rotate = 1;
-                    par.v0 = xform.PointTransform(Vector3(ll, y0, tt)-o);
-                    par.v1 = xform.PointTransform(Vector3(ll, y0, bb)-o);
-                    par.v2 = xform.PointTransform(Vector3(rr, y0, bb)-o);
-                    par.v3 = xform.PointTransform(Vector3(rr, y0, tt)-o);
 
                     TexCoord& tc = par.tc;
                     tc.x0 = s0; tc.x1 = s1;
@@ -519,7 +516,7 @@ void VRVideoPlayer::DrawSubtitle_(mlabs::balai::math::Matrix3 const& xform, int 
                 float const mH = 0.5f*(screen.z0 + screen.z1);
                 if (tt>mH) {
                     // use only the top part
-                    float const dh = tt - mH;
+                    dh = tt - mH;
                     t1 = dh/(tt-bb); 
                     tt = bb + dh;
 
@@ -1019,11 +1016,11 @@ void VRVideoPlayer::ThumbnailDecodeLoop_()
                                 }
 
                                 int lo(255),hi(0),totals(0);
-                                for (int i=0; i<256; ++i) {
-                                    if (histogram[i]>0) {
-                                        totals += histogram[i];
-                                        if (lo>i) lo = i;
-                                        if (hi<i) hi = i;
+                                for (int k=0; k<256; ++k) {
+                                    if (histogram[k]>0) {
+                                        totals += histogram[k];
+                                        if (lo>k) lo = k;
+                                        if (hi<k) hi = k;
                                     }
                                 }
                                 assert((ww*hh)==totals);
@@ -1190,7 +1187,7 @@ void VRVideoPlayer::ThumbnailDecodeLoop_()
             for (int j=0; 0<=menu_page_ && j<MENU_VIDEO_THUMBNAILS; ++j) {
                 int const id = page*MENU_VIDEO_THUMBNAILS + j;
                 if (id<total_videos) {
-                    VideoTrack* video = playList_[id];
+                    video = playList_[id];
                     int const offset = video->ThumbnailCache();
                     assert(offset==(128+(1024*768*3+256)*id));
                     if (-1==video->ThumbnailTextureId() && offset>0) {
@@ -2025,23 +2022,24 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
         dashboard_aniamtion_xform *= scale;
     }
 
-    // draw dashboard base
-    float const dw = 0.5f*dashboard_width_;
-    float const dh = 0.5f*dashboard_height_;
+    Primitives& prim = Primitives::GetInstance();
     Color color;
 
-    Primitives& prim = Primitives::GetInstance();
+    // draw dashboard base
     renderer.SetBlendMode(GFXBLEND_SRCALPHA, GFXBLEND_INVSRCALPHA);
     renderer.SetWorldMatrix(dashboard_aniamtion_xform);
     renderer.SetCullDisable();
-    prim.BeginDraw(NULL, GFXPT_QUADLIST);
+    if (prim.BeginDraw(NULL, GFXPT_QUADLIST)) {
+        float const dw = 0.5f*dashboard_width_;
+        float const dh = 0.5f*dashboard_height_;
         color = viveColor_; color.a = 64;
         prim.SetColor(color);
         prim.AddVertex(-dw, 0.0f, dh);
         prim.AddVertex(-dw, 0.0f, -dh);
         prim.AddVertex(dw, 0.0f, -dh);
         prim.AddVertex(dw, 0.0f, dh);
-    prim.EndDraw();
+        prim.EndDraw();
+    }
 
     // enable Z write
     renderer.SetBlendDisable();
@@ -2283,15 +2281,14 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                             //         (hemi-) sphere here.
                             //
                             if (video->GetSphericalAngles(longi, lat_inf, lati_sup)) {
-                                // oh boy! it's non-sense, actually:-)
-                                float const crop_factor = (longi>180) ? 0.66f:0.8f;
+                                float const crop = (longi>180) ? 0.66f:0.8f;
                                 s0 = 0.5f*(s0+s1);
-                                s1 = (s1-s0)*crop_factor;
+                                s1 = (s1-s0)*crop;
                                 s0 -= s1;
                                 s1 = s0 + 2.0f*s1;
 
                                 t0 = 0.5f*(t0+t1);
-                                t1 = (t1-t0)*crop_factor;
+                                t1 = (t1-t0)*crop;
                                 t0 -= t1;
                                 t1 = t0 + 2.0f*t1;
                             }
@@ -2413,15 +2410,14 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                             }
 
                             if (is360) {
-                                // oh boy! it's non-sense, actually:-)
-                                float const crop_factor = (longi>180) ? 0.66f:0.8f;
+                                float const crop = (longi>180) ? 0.66f:0.8f;
                                 s0 = 0.5f*(s0+s1);
-                                s1 = (s1-s0)*crop_factor;
+                                s1 = (s1-s0)*crop;
                                 s0 -= s1;
                                 s1 = s0 + 2.0f*s1;
 
                                 t0 = 0.5f*(t0+t1);
-                                t1 = (t1-t0)*crop_factor;
+                                t1 = (t1-t0)*crop;
                                 t0 -= t1;
                                 t1 = t0 + 2.0f*t1;
                             }
@@ -2671,12 +2667,12 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                 }
 
                 if (!isValid) {
-                    float const dh = 0.168f * rect.Height();
-                    float const dw = dh * texcoords_[DRAW_TEXT_ERROR].AspectRatio();
-                    decal.x0 = 0.5f*(rect.x0+rect.x1) - 0.5f*dw;
-                    decal.x1 = decal.x0 + dw;
-                    decal.z0 = (0.33f*rect.z0+0.66f*rect.z1) + 0.5f*dh;
-                    decal.z1 = decal.z0 - dh;
+                    float const hh = 0.168f * rect.Height();
+                    float const ww = hh * texcoords_[DRAW_TEXT_ERROR].AspectRatio();
+                    decal.x0 = 0.5f*(rect.x0+rect.x1) - 0.5f*ww;
+                    decal.x1 = decal.x0 + ww;
+                    decal.z0 = (0.33f*rect.z0+0.66f*rect.z1) + 0.5f*hh;
+                    decal.z1 = decal.z0 - hh;
                     color = Color::Black; color.a = 128;
                     prim.SetColor(color);
                     prim.AddVertex(decal.x0, y, decal.z0);
@@ -2808,8 +2804,8 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                 }
 
                 // file name
-                TexCoord const& tc = video->GetFontTexCoord(id);
                 if (0<=id && id<(int)fonts_.size()) {
+                    TexCoord const& tc = video->GetFontTexCoord(id);
                     if (id!=0) {
                         prim.EndDraw();
 #ifndef USE_SUBTITLE_FONT_SHADER
@@ -2820,12 +2816,12 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                         prim.BeginDraw(GFXPT_QUADLIST);
                     }
 
-                    float const dh = 0.12f*(rect.z0-rect.z1);
-                    float const dw = dh*tc.AspectRatio();
-                    z1 = rect.z1 + 0.1f*dh;
-                    z0 = z1 + dh;
-                    x0 = 0.5f*(rect.x0 + rect.x1) - 0.5f*dw;
-                    x1 = x0 + dw;
+                    float const hh = 0.12f*(rect.z0-rect.z1);
+                    float const ww = hh*tc.AspectRatio();
+                    z1 = rect.z1 + 0.1f*hh;
+                    z0 = z1 + hh;
+                    x0 = 0.5f*(rect.x0 + rect.x1) - 0.5f*ww;
+                    x1 = x0 + ww;
                     prim.SetColor(Color::White);
                     prim.AddVertex(x0, y, z0, tc.x0, tc.y0);
                     prim.AddVertex(x0, y, z1, tc.x0, tc.y1);
@@ -2939,13 +2935,13 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                     float const size = 0.2f*(rect.Width() + rect.Height());
                     float const cx = 0.5f*(rect.x0+rect.x1);
                     float const cy = 0.5f*(rect.z0+rect.z1);
-                    float x0, x1, x2, x3, z0, z1, z2, z3;
-                    BusySquare(x0, z0, x1, z1, x2, z2, x3, z3,
+                    float x[4], z[4];
+                    BusySquare(x[0], z[0], x[1], z[1], x[2], z[2], x[3], z[3],
                                size, processing_animation_time);
-                    prim.AddVertex(cx+x0, 0.0f, cy+z0, tc.x0, tc.y0);
-                    prim.AddVertex(cx+x1, 0.0f, cy+z1, tc.x0, tc.y1);
-                    prim.AddVertex(cx+x2, 0.0f, cy+z2, tc.x1, tc.y1);
-                    prim.AddVertex(cx+x3, 0.0f, cy+z3, tc.x1, tc.y0);
+                    prim.AddVertex(cx+x[0], 0.0f, cy+z[0], tc.x0, tc.y0);
+                    prim.AddVertex(cx+x[1], 0.0f, cy+z[1], tc.x0, tc.y1);
+                    prim.AddVertex(cx+x[2], 0.0f, cy+z[2], tc.x1, tc.y1);
+                    prim.AddVertex(cx+x[3], 0.0f, cy+z[3], tc.x1, tc.y0);
                 }
 
                 prim.EndDraw();
@@ -3105,8 +3101,8 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
             Vector3 const& h = pt.pt;
             float const sh = 0.2f * sqrt(pt.dist/dashboard_distance_);
             float const sw = sh*tc.AspectRatio();
-            float x0 = h.x - 0.5f*sw;
-            float x1 = h.x + 0.5f*sw;
+            x0 = h.x - 0.5f*sw;
+            x1 = h.x + 0.5f*sw;
             float z0 = h.z + 0.5f*sh;
             float z1 = h.z - 0.5f*sh;
             prim.AddVertex(x0, h.y, z0, tc.x0, tc.y0);
@@ -3309,16 +3305,16 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
 bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
 {
     float const current_time = (float) mlabs::balai::system::GetTime();
-    float const x1 = 0.5f*dashboard_width_;
-    float const x0 = -x1;
-    float const z1 = -0.5f*dashboard_height_;
+    float const dashboard_x1 = 0.5f*dashboard_width_;
+    float const dashboard_x0 = -dashboard_x1;
+    float const dashboard_z1 = -0.5f*dashboard_height_;
 
     Rectangle seekRect;
     bool const show_seekbar = GetUIWidgetRect_(seekRect, DRAW_UI_SEEK_BAR);
-    float z0 = widget_top_;
+    float dashboard_z0 = widget_top_;
     if (!show_seekbar) {
         GetUIWidgetRect_(seekRect, DRAW_UI_REPLAY); // never fail
-        z0 = 0.5f*(z0+seekRect.z0);
+        dashboard_z0 = 0.5f*(dashboard_z0+seekRect.z0);
     }
 
     float alpha = 1.0f;
@@ -3329,10 +3325,10 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
         alpha = (current_time-widget_timer_)/animation_duration_;
         alpha *= alpha;
         if (2==widget_on_) {
-            z0 = z1 + widget_height_*alpha;
+            dashboard_z0 = dashboard_z1 + widget_height_*alpha;
         }
         else if (1==widget_on_) {
-            z0 -= widget_height_*alpha;
+            dashboard_z0 -= widget_height_*alpha;
             alpha = 1.0f - alpha;
         }
 
@@ -3364,10 +3360,10 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
     prim.BeginDraw(NULL, GFXPT_QUADLIST);
         // decal base
         prim.SetColor(color);
-        prim.AddVertex(x0, 0.0f, z0);
-        prim.AddVertex(x0, 0.0f, z1);
-        prim.AddVertex(x1, 0.0f, z1);
-        prim.AddVertex(x1, 0.0f, z0);
+        prim.AddVertex(dashboard_x0, 0.0f, dashboard_z0);
+        prim.AddVertex(dashboard_x0, 0.0f, dashboard_z1);
+        prim.AddVertex(dashboard_x1, 0.0f, dashboard_z1);
+        prim.AddVertex(dashboard_x1, 0.0f, dashboard_z0);
         if (show_seekbar && ((alpha>=1.0f && widget_on_>1) || widget_on_>2)) {
             // seek bar
             color.r = color.g = color.b = 255; color.a = 128;
@@ -4044,7 +4040,6 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
         if (show_next_track) {
             VideoTrack* next = NULL;
             VideoTrack* prev = NULL;
-            int const totals = playList_.size();
             for (int i=0; i<totals; ++i) {
                 if (playList_[i]==current_track_) {
                     next = playList_[(i+1)%totals];
@@ -4062,8 +4057,8 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
                     int const index = ((int) floor(current_time))%4;
                     float s0 = 0.5f*(index%2); float s1 = s0 + 0.5f;
                     float t0 = 0.5f*(index/2); float t1 = t0 + 0.5f;
-                    float z1 = rectNextTrack.z0 + 0.05f*sh;
-                    float z0 = z1 + sh;
+                    float bb = rectNextTrack.z0 + 0.05f*sh;
+                    float tt = bb + sh;
                     float x0 = 0.5f*(rectNextTrack.x0 + rectNextTrack.x1) - 0.5f*sw;
                     float x1 = x0 + sw;
 
@@ -4101,10 +4096,10 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
                             t1 = t0 + 2.0f*t1;
                         }
                     }
-                    prim.AddVertex(x0, 0.0f, z0, s0, t0);
-                    prim.AddVertex(x0, 0.0f, z1, s0, t1);
-                    prim.AddVertex(x1, 0.0f, z1, s1, t1);
-                    prim.AddVertex(x1, 0.0f, z0, s1, t0);
+                    prim.AddVertex(x0, 0.0f, tt, s0, t0);
+                    prim.AddVertex(x0, 0.0f, bb, s0, t1);
+                    prim.AddVertex(x1, 0.0f, bb, s1, t1);
+                    prim.AddVertex(x1, 0.0f, tt, s1, t0);
                     prim.EndDraw();
                 }
 /*
@@ -4116,13 +4111,13 @@ bool VRVideoPlayer::DrawWidgets_(mlabs::balai::VR::HMD_EYE eye) const
 
                 TexCoord const& tc = texcoords_[DRAW_TEXT_NEXT];
                 float th = 0.1f*sh;
-                x0 += 0.1f*th; z0 += 0.1f*th;
+                x0 += 0.1f*th; tt += 0.1f*th;
                 x1 = x0 + th*tc.AspectRatio();
-                z1 = z0 - th;
-                prim.AddVertex(x0, 0.0f, z0, tc.x0, tc.y0);
-                prim.AddVertex(x0, 0.0f, z1, tc.x0, tc.y1);
-                prim.AddVertex(x1, 0.0f, z1, tc.x1, tc.y1);
-                prim.AddVertex(x1, 0.0f, z0, tc.x1, tc.y0);
+                bb = z0 - th;
+                prim.AddVertex(x0, 0.0f, tt, tc.x0, tc.y0);
+                prim.AddVertex(x0, 0.0f, bb, tc.x0, tc.y1);
+                prim.AddVertex(x1, 0.0f, bb, tc.x1, tc.y1);
+                prim.AddVertex(x1, 0.0f, tt, tc.x1, tc.y0);
 
                 x0 = x1;// + 0.1f*th;
 

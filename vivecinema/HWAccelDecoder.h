@@ -27,7 +27,7 @@
  * @history 2017/08/22 created
  *
  */
-#include "BLCore.h"
+#include "VideoTexture.h"
 
 extern "C" {
 #include "libavformat/avformat.h"
@@ -59,8 +59,11 @@ public:
     virtual bool can_send_packet() = 0;
     virtual bool can_receive_frame(int64_t& pts, int64_t& duration) = 0;
     virtual bool send_packet(AVPacket const& pkt) = 0;
-    virtual bool receive_frame(uint8_t* nv12, int width, int height) = 0;
+    virtual bool receive_frame(VideoFrame& frame) = 0;
     virtual bool discard_frame() = 0;
+
+    // after frame presented, recycle resource
+    virtual bool finish_frame(VideoFrame&) { return true; }
 
     // factory
     static VideoDecoderImp* New(AVStream const* stream, int width, int height);
@@ -79,8 +82,14 @@ int InitContext(void* device);
 // [render thread]
 void DeinitContext();
 
-// how is GPU accelerated
+// how good is GPU accelerated?
 int GPUAccelScore();
+
+// unregister graphics object
+bool UnregisterGraphicsObject(void*);
+
+// cupy video frame(nv12 format) to pixel buffer object
+bool CudaCopyVideoFrame(GLuint glPBO, VideoFrame const& frame);
 }
 
 }}}

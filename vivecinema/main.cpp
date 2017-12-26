@@ -96,8 +96,10 @@ namespace mlabs { namespace balai { namespace framework {
  *   2017.09.29 ver 0.9.563 - GPL3 license, open source https://github.com/openbigdatagroup/vivecinema
  *   2017.11.30 ver 0.9.624 - (12th <the last?> submit) fix subtitle sleep, remove async.
  *   2017.12.08 ver 0.9.632 - Fix NVDEC hevc main10/12 profile GP10x GPU
+ *   2017.12.20 ver 0.9.644 - CUDA/OpenGL interop. frame rate isn't a problem anymore! testing...
+ *   2017.12.25 ver 0.9.649 - fix texture failed to update with CUDA/OpenGL interoperability
  */
-char const* const buildNo = "Vive Cinema Build 0.9.632";
+char const* const buildNo = "Vive Cinema Build 0.9.649";
 
 #define DRAW_SINGLE_VIEW
 #ifdef DRAW_SINGLE_VIEW
@@ -579,21 +581,21 @@ public:
                 if (prim.BeginDraw(tex, GFXPT_SCREEN_QUADLIST)) {
                     float const dst_aspect_ratio = renderer.GetScreenAspectRatio();
                     float const src_aspect_ratio = tex->Width()/(float)tex->Height();
-                    float s0(0.0f), s1(1.0f), t0(0.0f), t1(1.0f);
+                    float x0(0.0f), x1(1.0f), y0(0.0f), y1(1.0f);
                     if (src_aspect_ratio<dst_aspect_ratio) {
-                        t1 = src_aspect_ratio/dst_aspect_ratio;
-                        t0 = 0.5f - 0.5f*t1;
-                        t1 += t0;
+                        y1 = src_aspect_ratio/dst_aspect_ratio;
+                        y0 = 0.5f - 0.5f*y1;
+                        y1 += y0;
                     }
                     else if (src_aspect_ratio>dst_aspect_ratio) {
-                        s1 = dst_aspect_ratio/src_aspect_ratio;
-                        s0 = 0.5f - 0.5f*s1;
-                        s1 += s0;
+                        x1 = dst_aspect_ratio/src_aspect_ratio;
+                        x0 = 0.5f - 0.5f*x1;
+                        x1 += x0;
                     }
-                    prim.AddVertex2D(0.0f, 0.0f, s0, t1);
-                    prim.AddVertex2D(0.0f, 1.0f, s0, t0);
-                    prim.AddVertex2D(1.0f, 1.0f, s1, t0);
-                    prim.AddVertex2D(1.0f, 0.0f, s1, t1);
+                    prim.AddVertex2D(0.0f, 0.0f, x0, y1);
+                    prim.AddVertex2D(0.0f, 1.0f, x0, y0);
+                    prim.AddVertex2D(1.0f, 1.0f, x1, y0);
+                    prim.AddVertex2D(1.0f, 0.0f, x1, y1);
                     prim.EndDraw();
                 }
                 tex->Release();
@@ -695,7 +697,7 @@ public:
                 int const font_size = 16;
                 Color const font_color = Color::White;
                 char msg[160];
-                float y = 0.01f;
+                y = 0.01f;
                 font_->DrawText(0.99f, y, font_size, Color::Yellow, "[Toggle Display:D]", FONT_ALIGN_RIGHT);
                 std::sprintf(msg, "FPS : %d", int(GetFPS()+0.5f));
                 float const dy = font_->DrawText(0.01f, y, 15, font_color, msg);
@@ -1131,16 +1133,16 @@ public:
                             std::sprintf(msg, "Audio : %02d:%02d:%02d:%02d", h, m, s, ms/10);
                             y+=font_->DrawText(0.01f, y, font_size, font_color, msg);
 
-                            int extStreamId(0), start(0), duration(0);
+                            int extStreamId(0), start(0), subduration(0);
                             bool hardsub = false;
-                            int const streamId = player_.SubtitleBuffering(extStreamId, hardsub, start, duration);
+                            int const streamId = player_.SubtitleBuffering(extStreamId, hardsub, start, subduration);
                             if (streamId>=0) {
-                                if (duration>0) {
+                                if (subduration>0) {
                                     ms = start;
                                     s  = ms/1000; ms %= 1000;
                                     m  = s/60; s %= 60;
                                     h  = m/60; m %= 60;
-                                    int ms2 = start + duration;
+                                    int ms2 = start + subduration;
                                     int s2  = ms2/1000; ms2 %= 1000;
                                     int m2  = s2/60; s2 %= 60;
                                     int h2  = m2/60; m2 %= 60;
