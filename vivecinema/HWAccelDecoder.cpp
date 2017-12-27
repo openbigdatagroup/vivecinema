@@ -1691,7 +1691,7 @@ bool VideoTexture::Resize(int w, int h)
                     if (CUDA_SUCCESS==res) {
                         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, glPBO_);
                         cleared = yPlane_->UpdateImage((uint16)w, (uint16)h, graphics::FORMAT_I8, 0) &&
-                                 uvPlane_->UpdateImage(uint16(w/2), uint16(h/2), graphics::FORMAT_IA8, (void const*) pixel_size);
+                                 uvPlane_->UpdateImage(uint16(w/2), uint16(h/2), graphics::FORMAT_IA8, ((char const*)NULL)+pixel_size);
                         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
                     }
                 }

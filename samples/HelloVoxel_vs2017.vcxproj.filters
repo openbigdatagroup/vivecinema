@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="raymarching.cpp" />
+    <ClCompile Include="SFG\SFGPVMParser.cpp">
+      <Filter>SFG</Filter>
+    </ClCompile>
+    <ClCompile Include="SFG\SFGVoxelViewer.cpp">
+      <Filter>SFG</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="SFG\SFGDataset.h">
+      <Filter>SFG</Filter>
+    </ClInclude>
+    <ClInclude Include="SFG\SFGPVMParser.h">
+      <Filter>SFG</Filter>
+    </ClInclude>
+    <ClInclude Include="SFG\SFGVoxelViewer.h">
+      <Filter>SFG</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="SFG">
+      <UniqueIdentifier>{fdb97ba9-5a54-443f-bb8c-dcd004482bfb}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

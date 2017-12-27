@@ -186,7 +186,7 @@ bool VideoTexture::ClearBlack()
         }
 
         yPlane_->UpdateImage((uint16)w, (uint16)h, FORMAT_I8, 0);
-        uvPlane_->UpdateImage((uint16)w/2, (uint16)h/2, FORMAT_IA8, (void const*) pixel_size);
+        uvPlane_->UpdateImage((uint16)w/2, (uint16)h/2, FORMAT_IA8, ((char const*)NULL)+pixel_size);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
         return true;
@@ -223,7 +223,7 @@ bool VideoTexture::Update(VideoFrame const& frame)
         }
 
         yPlane_->UpdateImage((uint16)frame.Width, (uint16)frame.Height, FORMAT_I8, 0);
-        uvPlane_->UpdateImage(uint16(frame.Width/2), uint16(frame.Height/2), FORMAT_IA8, (void const*) pixel_size);
+        uvPlane_->UpdateImage(uint16(frame.Width/2), uint16(frame.Height/2), FORMAT_IA8, ((char const*)NULL)+pixel_size);
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
         return true;
