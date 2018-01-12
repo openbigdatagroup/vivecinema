@@ -1286,31 +1286,145 @@ class VideoMetadata
                         _fseeki64(file, dataSize-rsize, SEEK_CUR);
                     }
 
-                    if (0==buf[0]) { // mono
-                        stereo_mode_ = 0;
-                    }
-                    else if (1==buf[0]) { // top-down
-                        stereo_mode_ = 1;
-                    }
-                    else if (2==buf[0]) { // left-right
-                        stereo_mode_ = 2;
-                    }
-                    else if (3==buf[0]) {
-                        BL_LOG("Stereoscopic 3D Video Box (st3d) \"Stereo-Mesh\" not support!\n");
-                    }
-                    else {
-                        BL_LOG("Stereoscopic 3D Video Box (st3d) with illegal value(%d)!\n", buf[0]);
+                    if (rsize>=5) {
+                        uint8 const stereo_mode = buf[4]; // shift 4 bytes for fullbox
+                        if (0==stereo_mode) { // mono
+                            stereo_mode_ = 0;
+                        }
+                        else if (1==stereo_mode) { // top-down
+                            stereo_mode_ = 1;
+                        }
+                        else if (2==stereo_mode) { // left-right
+                            stereo_mode_ = 2;
+                        }
+                        else if (3==stereo_mode) {
+                            BL_LOG("Stereoscopic 3D Video Box (st3d) \"Stereo-Mesh\" not support!\n");
+                        }
+                        else {
+                            BL_LOG("Stereoscopic 3D Video Box (st3d) with illegal value(%d)!\n", stereo_mode);
+                        }
                     }
                 }
                 else if (0==memcmp(hdr+4, "sv3d", 4)) { // Spherical Video Box (sv3d)
-                    // This box should be placed 'after' the Stereoscopic3D box if one is present.
-                    // and before optional boxes at the end of the VisualSampleEntry
-                    // definition such as the CleanApertureBox and PixelAspectRatioBox(pasp)
                     //
-                    // (let VIDEO_SOURCE = VIDEO_SOURCE_GOOGLE_JUMP_RFC2 if loaded successfully)
+                    // aligned(8) class ProjectionDataBox(unsigned int(32) proj_type, unsigned int(8)version, unsigned int(24) flags)
+                    //                        extends FullBox(proj_type, version, flags) {
+                    // }
                     //
-                    BL_LOG("[TO-DO : Spherical Video V2 RFC] Spherical Video Box (sv3d) is coming!\n");
-                    _fseeki64(file, dataSize, SEEK_CUR);
+                    // aligned(8) class SphericalVideoBox extends Box(．sv3d・) {
+                    //
+                    //      aligned(8) class SphericalVideoHeader extends FullBox(．svhd・, 0, 0) {
+                    //          string metadata_source; // UTF8
+                    //      }
+                    //
+                    //      aligned(8) class Projection extends Box(．proj・) {
+                    //          aligned(8) class ProjectionHeader extends FullBox(．prhd・, 0, 0) {
+                    //              int(32) pose_yaw_degrees;
+                    //              int(32) pose_pitch_degrees;
+                    //              int(32) pose_roll_degrees;
+                    //          }
+                    //
+                    //          aligned(8) class EquirectangularProjection ProjectionDataBox(．equi・, 0, 0) {
+                    //              unsigned int(32) projection_bounds_top;
+                    //              unsigned int(32) projection_bounds_bottom;
+                    //              unsigned int(32) projection_bounds_left;
+                    //              unsigned int(32) projection_bounds_right;
+                    //          }
+                    //      }
+                    // }
+                    //
+                    rsize = 0;
+                    if (dataSize>=((12+1) + (8+(12+3*4)+(12+4*4)))) {
+                        // svhd : full box
+                        rsize = (uint32) fread(buf, 1, 8, file);
+                        if (8==rsize && 0==memcmp(buf+4, "svhd", 4)) {
+                            uint32 svhd_size = BL_MAKE_4CC(buf[0], buf[1], buf[2], buf[3]);
+                            if ((12+1)<=svhd_size) {
+                                _fseeki64(file, svhd_size-8, SEEK_CUR);
+
+                                // proj : box
+                                uint32 proj_size = (uint32) fread(buf, 1, 8, file);
+                                if (8==proj_size && 0==memcmp(buf+4, "proj", 4)) {
+                                    proj_size = BL_MAKE_4CC(buf[0], buf[1], buf[2], buf[3]);
+                                    if ((8+(12+3*4)+(12+4*4))<=proj_size && proj_size<=sizeof(buf)) {
+                                        uint32 s1 = (uint32) fread(buf, 1, proj_size-8, file);
+                                        if (s1==proj_size-8) {
+                                            uint8* ptr = buf;
+                                            s1 = BL_MAKE_4CC(ptr[0], ptr[1], ptr[2], ptr[3]);
+                                            if ((12+(4*3))<=s1 && 0==memcmp(ptr+4, "prhd", 4)) {
+                                                //
+                                                // Pose values are 16.16 fixed point values measuring rotation in degrees.
+                                                // pose_yaw_degrees   : ptr[12], ptr[13], ptr[14], ptr[15]
+                                                // pose_pitch_degrees : ptr[16], ptr[17], ptr[18], ptr[19]
+                                                // pose_roll_degrees  : ptr[20], ptr[21], ptr[22], ptr[23]
+                                                //
+
+                                                ptr = buf + s1;
+                                                s1 = BL_MAKE_4CC(ptr[0], ptr[1], ptr[2], ptr[3]);
+                                                if ((12+(4*4))<=s1 && 0==memcmp(ptr+4, "equi", 4)) { // Equirectangular Projection Box
+                                                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
+                                                    longitude_ = 360;
+                                                    latitude_south_  = -90;
+                                                    latitude_north_  =  90;
+
+                                                    //
+                                                    // The projection bounds use 0.32 fixed point values.
+                                                    // These values represent the proportion of projection cropped from each edge not covered
+                                                    // by the video frame. For an uncropped frame all values are 0.
+                                                    //
+                                                    uint32 const projection_bounds_top    = BL_MAKE_4CC(ptr[12], ptr[13], ptr[14], ptr[15]);
+                                                    uint32 const projection_bounds_bottom = BL_MAKE_4CC(ptr[16], ptr[17], ptr[18], ptr[19]);
+                                                    uint32 const projection_bounds_left   = BL_MAKE_4CC(ptr[20], ptr[21], ptr[22], ptr[23]);
+                                                    uint32 const projection_bounds_right  = BL_MAKE_4CC(ptr[24], ptr[25], ptr[26], ptr[27]);
+                                                    if (0!=projection_bounds_left || 0!=projection_bounds_right) {
+                                                        if (projection_bounds_right<(0xffffffff-projection_bounds_left)) {
+                                                            longitude_ = (int)(360.0 * (1.0 - ((double)(projection_bounds_left + projection_bounds_right))/(double)0xffffffff));
+                                                            if (longitude_>360)
+                                                                longitude_ = 360;
+                                                        }
+                                                    }
+
+                                                    if (0!=projection_bounds_top || 0!=projection_bounds_bottom) {
+                                                        if (projection_bounds_bottom<(0xffffffff-projection_bounds_top)) {
+                                                            if (0!=projection_bounds_top) {
+                                                                latitude_north_ = (int) (90.0 - 180.0*((double)projection_bounds_top/(double)0xffffffff)); 
+                                                                if (latitude_north_>90)
+                                                                    latitude_north_ = 90;
+                                                            }
+
+                                                            if (0!=projection_bounds_bottom) {
+                                                                latitude_south_ = (int) (-90.0 + 180.0*((double)projection_bounds_bottom/(double)0xffffffff));
+                                                                if (latitude_south_<-90)
+                                                                    latitude_south_ = 90;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                else if (0==memcmp(buf+4, "cbmp", 4)) { // Cubemap Projection Box
+                                                    // ???
+                                                }
+                                                else if (0==memcmp(buf+4, "mshp", 4)) { // Mesh Projection Box
+                                                    // ???
+                                                }
+                                            }
+                                        }
+                                        else {
+                                            proj_size = s1 + 8;
+                                        }
+                                    }
+                                    else {
+                                        _fseeki64(file, proj_size-8, SEEK_CUR);
+                                    }
+                                }
+
+                                rsize = svhd_size + proj_size;
+                            }
+                        }
+                    }
+
+                    if (rsize<dataSize) {
+                        _fseeki64(file, dataSize-rsize, SEEK_CUR);
+                    }
                 }
                 else {
                     _fseeki64(file, dataSize, SEEK_CUR);
