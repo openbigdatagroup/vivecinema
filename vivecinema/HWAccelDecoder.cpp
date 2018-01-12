@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    HWAccelDecoder.cpp
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2017/08/22 created
  *
  */
@@ -1313,8 +1313,7 @@ int InitContext(void* /*device*/)
             // best choice
             int best_device_index = -1;
             int best_major(0), best_minor(0);
-            int best_h264_size(0), best_hevc_size(0);
-
+            int best_h264_macroblocks(0), best_hevc_macroblocks(0);
             CUdevice cuda_device = 0;
             CUVIDDECODECAPS cap;
             memset(&cap, 0, sizeof(cap));
@@ -1322,7 +1321,7 @@ int InitContext(void* /*device*/)
             cap.nBitDepthMinus8 = 0; // 2 for 10-bit, 4 for 12-bit
             for (int i=0; i<cuda_device_count; ++i) {
                 int major(0), minor(0), bTCC(0);
-                int h264_max_size(0), hevc_max_size(0);
+                int h264_macroblocks(0), hevc_macroblocks(0);
                 if (CUDA_SUCCESS==cuDeviceGet(&cuda_device, i) &&
                     CUDA_SUCCESS==cuDeviceComputeCapability(&major, &minor, cuda_device) &&
                     (major>1||(1==major && minor>=1)) &&
@@ -1331,10 +1330,11 @@ int InitContext(void* /*device*/)
                     if (CUDA_SUCCESS==cuCtxCreate(&cudaCtx, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device) && cudaCtx) {
                         cap.eCodecType = cudaVideoCodec_H264;
                         if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported) {
-                            h264_max_size = cap.nMaxWidth*cap.nMaxHeight; 
+                            // max supported macroblock count : CodedWidth*CodedHeight/256 must be <= nMaxMBCount
+                            h264_macroblocks = cap.nMaxMBCount;
                             cap.eCodecType = cudaVideoCodec_HEVC;
                             if (CUDA_SUCCESS==cuvidGetDecoderCaps(&cap) && cap.bIsSupported) {
-                                hevc_max_size = cap.nMaxWidth*cap.nMaxHeight;
+                                hevc_macroblocks = cap.nMaxMBCount;
                             }
 
                             // is this good?
@@ -1342,16 +1342,16 @@ int InitContext(void* /*device*/)
                                 best_device_index = i;
                                 best_major = major;
                                 best_minor = minor;
-                                best_h264_size = h264_max_size;
-                                best_hevc_size = hevc_max_size;
+                                best_h264_macroblocks = h264_macroblocks;
+                                best_hevc_macroblocks = hevc_macroblocks;
                             }
-                            else if (best_hevc_size<hevc_max_size ||
-                                     (best_hevc_size==hevc_max_size && best_h264_size<h264_max_size)) {
+                            else if (best_hevc_macroblocks<hevc_macroblocks ||
+                                     (best_hevc_macroblocks==hevc_macroblocks && best_h264_macroblocks<h264_macroblocks)) {
                                 best_device_index = i;
                                 best_major = major;
                                 best_minor = minor;
-                                best_h264_size = h264_max_size;
-                                best_hevc_size = hevc_max_size;
+                                best_h264_macroblocks = h264_macroblocks;
+                                best_hevc_macroblocks = hevc_macroblocks;
                             }
                         }
 

@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    AVDecoder.h
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2015/12/09 created
  *          2016/10/31 testing FFmpeg 3.1.5
  *          2017/07/07 migrate to FFmpeg 3.3.2 for better H.265 support
@@ -518,8 +518,8 @@ class AVDecoder
     uint8 audioBufferFlushing_; // audio switched, must flush buffer and force sync
     uint8 liveStream_;  // 2016.12.30 just a hint(for larger buffering)
     uint8 endOfStream_; // end of stream(internet traffic) or end of file
+    uint8 transcodeMode_; // transcode mode, keep every frame.
     volatile uint8 interruptRequest_;
-    // pad 1 byte...
 
     // open/close url/file/custom stream
     bool DoOpen_(AVFormatContext* fmtCtx, char const* url, VideoOpenOption const* param);
@@ -782,6 +782,8 @@ public:
 
         return get_streams;
     }
+
+    void TranscodeMode(bool enable) { transcodeMode_ = enable; }
 
     // audio setting
     AudioInfo const& GetAudioInfo() const { return audioInfo_; }

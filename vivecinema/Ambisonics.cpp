@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    Ambisonics.cpp
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2017/03/22 created
  *
  */

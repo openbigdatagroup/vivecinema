@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    main.cpp
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2016/03/15 created
  *
  */
@@ -98,8 +98,9 @@ namespace mlabs { namespace balai { namespace framework {
  *   2017.12.08 ver 0.9.632 - Fix NVDEC hevc main10/12 profile GP10x GPU
  *   2017.12.20 ver 0.9.644 - CUDA/OpenGL interop. frame rate isn't a problem anymore! testing...
  *   2017.12.25 ver 0.9.649 - fix texture failed to update with CUDA/OpenGL interoperability
+ *   2018.01.11 ver 0.9.666 - UI/minor fixes
  */
-char const* const buildNo = "Vive Cinema Build 0.9.649";
+char const* const buildNo = "Vive Cinema Build 0.9.666";
 
 #define DRAW_SINGLE_VIEW
 #ifdef DRAW_SINGLE_VIEW
@@ -632,7 +633,7 @@ public:
 
             float const x0 = 0.13f;
             float const x1 = 0.96f;
-            float const y0 = 0.17f;
+            float const y0 = 0.20f;
             float const y1 = 0.75f;
             float const jump1ms = (y1-y0)/11.11f;
             Color clr = Color::White;
@@ -705,7 +706,7 @@ public:
                 if (player_.IsLoaded()) {
                     int w, h, ms, s, m;
                     player_.GetVideoWidthHeight(w, h);
-                    std::sprintf(msg, "Resolution : %dx%d %.2f fps", w, h, player_.VideoFrameRate());
+                    std::sprintf(msg, "Resolution : %dx%d  %.2f fps", w, h, player_.VideoFrameRate());
                     y += font_->DrawText(0.01f, y, font_size, font_color, msg);
 
                     int const duration = player_.Duration();
@@ -728,13 +729,21 @@ public:
                     float const buffer_pos = 0.158f*1600.0f/width_;
                     float const packet_pos = 0.228f*1600.0f/width_;
 
-                    int out_of_sync = (videotime-audiotime)/100;
-                    if (out_of_sync>5) out_of_sync = 5;
-                    else if (out_of_sync<-5) out_of_sync = -5;
-                    memset(msg, '-', 11);
-                    msg[out_of_sync + 5] = '+';
-                    msg[11] = '\0';
-                    y += font_->DrawText(buffer_pos, y, font_size, font_color, msg);
+                    AUDIO_TECHNIQUE tech = AUDIO_TECHNIQUE_DEFAULT;
+                    char const* audioinfo = player_.GetAudioInfo(tech);
+
+                    if (audioinfo) {
+                        int out_of_sync = (videotime-audiotime)/100;
+                        if (out_of_sync>5) out_of_sync = 5;
+                        else if (out_of_sync<-5) out_of_sync = -5;
+                        memset(msg, '-', 11);
+                        msg[out_of_sync + 5] = '+';
+                        msg[11] = '\0';
+                        y += font_->DrawText(buffer_pos, y, font_size, font_color, msg);
+                    }
+                    else {
+                        y += dy;
+                    }
 
                     int packets(0), sn(0);
                     int vb = player_.VideoBuffering(packets, sn);
@@ -783,12 +792,17 @@ public:
                         }
                     }
 
-                    ms = audiotime%1000;
-                    s  = audiotime/1000;
-                    m  = s/60; s %= 60;
-                    h  = m/60; m %= 60;
-                    std::sprintf(msg, "Audio : %02d:%02d:%02d:%02d", h, m, s, ms/10);
-                    y+=font_->DrawText(0.01f, y, font_size, font_color, msg);
+                    if (audioinfo) {
+                        ms = audiotime%1000;
+                        s  = audiotime/1000;
+                        m  = s/60; s %= 60;
+                        h  = m/60; m %= 60;
+                        std::sprintf(msg, "Audio : %02d:%02d:%02d:%02d", h, m, s, ms/10);
+                        y+=font_->DrawText(0.01f, y, font_size, font_color, msg);
+                    }
+                    else {
+                        y+=font_->DrawText(0.01f, y, font_size, font_color, "Audio : N/A");
+                    }
 
                     int extStreamId(0), start(0), subduration(0);
                     bool hardsub = false;
@@ -816,6 +830,9 @@ public:
                                         hardsub ? ", hardsub":"");
                         }
                         y += font_->DrawText(0.01f, y, font_size, font_color, msg);
+                    }
+                    else {
+                        y += font_->DrawText(0.01f, y, font_size, font_color, "Subtitle : N/A");
                     }
 
                     font_->DrawText(x0-0.005f, y1 - jump1ms*4.5f, 16, Color::Yellow, "Update PBO", FONT_ALIGN_RIGHT);
@@ -1044,7 +1061,7 @@ public:
                         }
 
                         player_.GetVideoWidthHeight(w, h);
-                        std::sprintf(msg, "Resolution : %dx%d %.2f fps", w, h, player_.VideoFrameRate());
+                        std::sprintf(msg, "Resolution : %dx%d  %.2f fps", w, h, player_.VideoFrameRate());
                         y += font_->DrawText(0.01f, y, font_size, font_color, msg);
 
                         // video/audio buffer
@@ -1053,7 +1070,7 @@ public:
 
                         int videotime = player_.VideoTime(); if (videotime<0) videotime = 0;
                         int audiotime = player_.AudioTime(); if (audiotime<0) audiotime = 0;
-                        if (player_.IsPlaying()) {
+                        if (audioinfo && player_.IsPlaying()) {
                             int out_of_sync = (videotime-audiotime)/100;
                             if (out_of_sync>5) out_of_sync = 5;
                             else if (out_of_sync<-5) out_of_sync = -5;
@@ -1106,32 +1123,37 @@ public:
                             std::sprintf(msg, "Video : %02d:%02d:%02d:%02d", h, m, s, ms/10);
                             y += font_->DrawText(0.01f, y, font_size, font_color, msg);
 
-                            int ab = player_.AudioBuffering(packets, sn); // millisecond
-                            if (ab>0) {
-                                if (ab>800) ab = 800;
-                                ab /= 100;
-                                memset(msg, '+', ab);
-                                msg[ab] = '\0';
-                                font_->DrawText(buffer_pos, y, 15, font_color, msg);
-                                if (packets>0) {
-                                    if (packets>120) packets = 120;
-                                    int c = 0;
-                                    for (int i=0; i<packets; ++i) {
-                                        msg[c++] = ((sn++)%100) ? '-':'+';
-                                        if (0==(i+1)%10)
-                                            msg[c++] = ' ';
+                            if (audioinfo) {
+                                int ab = player_.AudioBuffering(packets, sn); // millisecond
+                                if (ab>0) {
+                                    if (ab>800) ab = 800;
+                                    ab /= 100;
+                                    memset(msg, '+', ab);
+                                    msg[ab] = '\0';
+                                    font_->DrawText(buffer_pos, y, 15, font_color, msg);
+                                    if (packets>0) {
+                                        if (packets>120) packets = 120;
+                                        int c = 0;
+                                        for (int i=0; i<packets; ++i) {
+                                            msg[c++] = ((sn++)%100) ? '-':'+';
+                                            if (0==(i+1)%10)
+                                                msg[c++] = ' ';
+                                        }
+                                        msg[c] = '\0';
+                                        font_->DrawText(packet_pos, y, 15, font_color, msg);
                                     }
-                                    msg[c] = '\0';
-                                    font_->DrawText(packet_pos, y, 15, font_color, msg);
                                 }
-                            }
 
-                            ms = audiotime%1000;
-                            s  = audiotime/1000;
-                            m  = s/60; s %= 60;
-                            h  = m/60; m %= 60;
-                            std::sprintf(msg, "Audio : %02d:%02d:%02d:%02d", h, m, s, ms/10);
-                            y+=font_->DrawText(0.01f, y, font_size, font_color, msg);
+                                ms = audiotime%1000;
+                                s  = audiotime/1000;
+                                m  = s/60; s %= 60;
+                                h  = m/60; m %= 60;
+                                std::sprintf(msg, "Audio : %02d:%02d:%02d:%02d", h, m, s, ms/10);
+                                y+=font_->DrawText(0.01f, y, font_size, font_color, msg);
+                            }
+                            else {
+                                y+=font_->DrawText(0.01f, y, font_size, font_color, "Audio : N/A");
+                            }
 
                             int extStreamId(0), start(0), subduration(0);
                             bool hardsub = false;
@@ -1161,7 +1183,8 @@ public:
                                 y += font_->DrawText(0.01f, y, 15, Color::White, msg);
                             }
                             else {
-                                y += dy;
+                                y+=font_->DrawText(0.01f, y, font_size, font_color, "Subtitle : N/A");
+                                //y += dy;
                             }
                         }
                         else {

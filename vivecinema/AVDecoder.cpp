@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    AVDecoder.cpp
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2015/12/09 created
  *
  */
@@ -1171,6 +1171,7 @@ subtitleBufferFlushing_(0),
 audioBufferFlushing_(0),
 liveStream_(0),
 endOfStream_(0),
+transcodeMode_(0),
 interruptRequest_(0)
 {
     // add decoder counter
@@ -2325,7 +2326,7 @@ bool AVDecoder::VideoThread_()
             bool frame_in_time = (0==timeStartSysTime_) || (timeStartSysTime_+videoPutPTS_+10000)>cur_time;
 
             // decode video frame
-            if (videoFramePut_<=NUM_VIDEO_BUFFER_FRAMES || frame_in_time ||
+            if (videoFramePut_<=NUM_VIDEO_BUFFER_FRAMES || frame_in_time || transcodeMode_ ||
                 consecutive_drop_frames>max_consecutive_drop_frames ||
                 (consecutive_drop_frames>4 && (0==frame_buffer_count))) {
                 int const slot = videoFramePut_%NUM_VIDEO_BUFFER_FRAMES;
@@ -4643,7 +4644,7 @@ bool AVDecoder::UpdateFrame()
                     // to prevent image overwrite, move videoFrameGet_ before host_->FrameUpdate() returned
                     //
                     int next_get = videoFrameGet_ + 1;
-                    while (next_get<videoFramePut_ &&
+                    while (next_get<videoFramePut_ && /*0==transcodeMode_ &&*/
                            video_pts>=decodedFrames_[next_get%NUM_VIDEO_BUFFER_FRAMES].PTS) {
                         videoDecoder_.finish_frame(decodedFrames_[slot]);
                         slot = next_get%NUM_VIDEO_BUFFER_FRAMES;

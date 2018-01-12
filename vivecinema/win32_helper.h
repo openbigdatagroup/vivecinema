@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    win32_helper.h
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2016/04/21 created
  *
  */

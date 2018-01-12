@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    VideoTexture.h
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2017/12/13
  *
  */

@@ -23,7 +23,7 @@
  * Technologies that are owed as a result of HTC providing the Software to you.
  *
  * @file    VideoTexture.cpp
- * @author  andre chen
+ * @author  andre chen, andre.HL.chen@gmail.com
  * @history 2017/12/13
  *
  */
@@ -140,7 +140,6 @@ bool VideoTexture::Initialize()
         uvPlane_ = new PBOTexture(1);
         // CUDA may not be ready yet...
         return Resize(1920, 1080);
-        //return ClearBlack();
     }
     return false;
 }
