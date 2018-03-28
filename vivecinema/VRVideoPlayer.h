@@ -1477,7 +1477,20 @@ public:
             }
         }
     }
-    void OnDataLag(int /*decoder_id*/, int lagtime) {
+    void OnVideoLateFrame(int /*decoder_id*/, int consecutives, int pts) {
+        int s = pts/1000;
+        BL_LOG("Late Video Frame(%d) at %d:%02d:%02d:%03d\n", consecutives,
+               s/3600, (s%3600)/60, s%60, pts%1000);
+    }
+    void OnAudioLateFrame(int /*decoder_id*/, int pts) {
+        int s = pts/1000;
+        BL_LOG("Late Audio Frame at %d:%02d:%02d:%03d\n",
+               s/3600, (s%3600)/60, s%60, pts%1000);
+    }
+    void OnAudioInterrupt(int /*decoder_id*/, int lagtime, int pts) {
+        int s = pts/1000;
+        BL_LOG("On audio data starving at %d:%02d:%02d:%03d lag:%dms\n",
+               s/3600, (s%3600)/60, s%60, pts%1000, lagtime);
         if (0==on_processing_ && NULL!=current_track_ && current_track_->IsLiveStream() &&
             current_track_->IsTimeout(lagtime)) {
             BL_LOG("** %s lag for %dms, restarting video...\n", current_track_->GetName(), lagtime);

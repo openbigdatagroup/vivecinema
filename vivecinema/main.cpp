@@ -99,8 +99,9 @@ namespace mlabs { namespace balai { namespace framework {
  *   2017.12.20 ver 0.9.644 - CUDA/OpenGL interop. frame rate isn't a problem anymore! testing...
  *   2017.12.25 ver 0.9.649 - fix texture failed to update with CUDA/OpenGL interoperability
  *   2018.01.11 ver 0.9.666 - UI/minor fixes, Spherical Video V2 RFC(mp4 only)
+ *   2018.03.28 ver 0.9.742 - Hong Kong International Film Festival, The Deserted VR Screening.
  */
-char const* const buildNo = "Vive Cinema Build 0.9.666";
+char const* const buildNo = "Vive Cinema Build 0.9.742";
 
 #define DRAW_SINGLE_VIEW
 #ifdef DRAW_SINGLE_VIEW

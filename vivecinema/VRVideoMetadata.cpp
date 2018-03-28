@@ -631,9 +631,10 @@ struct EBML_GoogleJump {
     bool check_track;
     bool check_spherical_uuid;
     bool check_spherical_video_tag;
+    bool check_spherical_video_v2_RFC;
 
     EBML_GoogleJump():longitude(0),latitude_south(0),latitude_north(0),stereo_mode(0),
-        check_track(false),check_spherical_uuid(false),check_spherical_video_tag(false) {}
+        check_track(false),check_spherical_uuid(false),check_spherical_video_tag(false),check_spherical_video_v2_RFC(false) {}
 
     bool IsValid() const {
         return check_track && check_spherical_uuid && check_spherical_video_tag &&
@@ -777,7 +778,7 @@ struct EBML_GoogleJump {
     }
 
     bool ParseV2(FILE* file, uint64 data_size) {
-#if 0
+        //
         // [Projection]
         //   [ProjectionType value = 1]
         //   [ProjectionPrivate]
@@ -787,41 +788,106 @@ struct EBML_GoogleJump {
         //       projection_bounds_bottom = 0
         //       projection_bounds_left = 0
         //       projection_bounds_right = 0
-        uint64 read_bytes(0), size;
+        longitude = latitude_south = latitude_north = 0;
+        uint32 ProjectionType = BL_BAD_UINT32_VALUE;
+        uint64 read_bytes(0), size(0);
         uint32 a, b, header;
         while (read_bytes<data_size) {
             header = EBML_element_header(a, file); read_bytes += a;
             size = EBML_element_size(b, file); read_bytes += b;
             if (0x7671==header) { // ProjectionType(Mandatory)
-                // ProjectionType is an enum(uinteger). The valid values are:
+                //
                 //  0: Rectangular
                 //  1: Equirectangular
                 //  2: Cubemap
                 //  3: Mesh
                 //
-                 _fseeki64(file, size, SEEK_CUR);
+                check_spherical_video_v2_RFC = true;
+                ProjectionType = EBML_element_read_uint(file, (uint32)size);
+                if (1==ProjectionType) {
+                    longitude  = 360;
+                    latitude_south = -90;
+                    latitude_north = 90;
+                }
             }
             else if (0x7672==header) { // ProjectionPrivate(optional)
                 //
-                // If ProjectionType equals 0 (Rectangular), then this element must NOT be present.
+                // 1) If ProjectionType equals 0 (Rectangular), then this element must NOT be present.
+                //
+                // 2) If ProjectionType equals 1 (Equirectangular), then this element may be present.
+                //    If the element is present, then it must contain the same binary data that
+                //    would be stored inside an ISOBMFF Equirectangular Projection Box ('equi').
+                //    If the element is not present, then the content must be treated as if an element
+                //    containing 20 zero bytes was present (i.e. a version 0 'equi' box with no flags
+                //    set and all projection_bounds fields set to 0).
+                //
+                // 3) If ProjectionType equals 2 (Cubemap), then this element must be present and contain
+                //    the same binary data that would be stored inside an ISOBMFF Cubemap Projection Box ('cbmp').
+                //
+                // 4) If ProjectionType equals 3 (Mesh), then this element must be present and contain the same
+                //    binary data that would be stored inside an ISOBMFF Mesh Projection Box ('mshp').
                 //
                 // If ProjectionPrivate presents, it contains binary data respect to ProjectionType:
                 //   Equirectangular Projection Box ('equi') for Equirectangular
                 //   Cubemap Projection Box ('cbmp') for Cubemap
                 //   Mesh Projection Box ('mshp') for Mesh
-                 _fseeki64(file, size, SEEK_CUR);
+                //
+                uint8 buf[1024];
+                if (0<ProjectionType && ProjectionType<=3 && size<=sizeof(buf)) {
+                    if (size==fread(buf, 1, (size_t)size, file)) {
+                        if (1==ProjectionType && 20<=size) {
+                            uint32 const projection_bounds_top    = BL_MAKE_4CC(buf[4], buf[5], buf[6], buf[7]);
+                            uint32 const projection_bounds_bottom = BL_MAKE_4CC(buf[8], buf[9], buf[10], buf[11]);
+                            uint32 const projection_bounds_left   = BL_MAKE_4CC(buf[12], buf[13], buf[14], buf[15]);
+                            uint32 const projection_bounds_right  = BL_MAKE_4CC(buf[16], buf[17], buf[18], buf[19]);
+                            if (0!=projection_bounds_left || 0!=projection_bounds_right) {
+                                if (projection_bounds_right<(0xffffffff-projection_bounds_left)) {
+                                    longitude = (int) (360.0 * (1.0 - ((double) (projection_bounds_left+projection_bounds_right))/(double)0xffffffff));
+                                    if (longitude>360)
+                                        longitude = 360;
+                                }
+                            }
+
+                            if (0!=projection_bounds_top || 0!=projection_bounds_bottom) {
+                                if (projection_bounds_bottom<(0xffffffff-projection_bounds_top)) {
+                                    if (0!=projection_bounds_top) {
+                                        latitude_north = (int) (90.0 - 180.0*((double)projection_bounds_top/(double)0xffffffff)); 
+                                        if (latitude_north>90)
+                                            latitude_north = 90;
+                                    }
+
+                                    if (0!=projection_bounds_bottom) {
+                                        latitude_south = (int) (-90.0 + 180.0*((double)projection_bounds_bottom/(double)0xffffffff));
+                                        if (latitude_south<-90)
+                                            latitude_south = 90;
+                                    }
+                                }
+                            }
+                        }
+                        else if (2==ProjectionType && 12<=size) {
+                            // uint32 const layout = BL_MAKE_4CC(buf[4], buf[5], buf[6], buf[7]);
+                            // uint32 const padding = BL_MAKE_4CC(buf[8], buf[9], buf[10], buf[11]);
+                        }
+                        else if (3==ProjectionType) {
+                            // ???
+                        }
+                    }
+                }
+                else {
+                    _fseeki64(file, size, SEEK_CUR);
+                }
             }
             else if (0x7673==header) { // ProjectionPoseYaw(Mandatory)
                 // float
-                 _fseeki64(file, size, SEEK_CUR);
+                _fseeki64(file, size, SEEK_CUR);
             }
             else if (0x7674==header) { // ProjectionPosePitch(Mandatory)
                 // float
-                 _fseeki64(file, size, SEEK_CUR);
+                _fseeki64(file, size, SEEK_CUR);
             }
             else if (0x7675==header) { // ProjectionPoseRoll(Mandatory)
                 // float
-                 _fseeki64(file, size, SEEK_CUR);
+                _fseeki64(file, size, SEEK_CUR);
             }
             else {
                 _fseeki64(file, size, SEEK_CUR);
@@ -831,11 +897,6 @@ struct EBML_GoogleJump {
         }
 
         return (read_bytes==data_size);
-#else
-        BL_LOG("[TO-DO : Spherical Video V2 RFC WebM (Matroska)] Projection master element(0x7670) is coming!\n");
-        _fseeki64(file, data_size, SEEK_CUR);
-        return true;
-#endif
     }
 };
 
@@ -1034,7 +1095,6 @@ class VideoMetadata
         aligned(8) class SphericalVideoBox extends Box('sv3d') {
             SphericalVideoHeader svhd; // mandatory
             Projection           proj; // mandatory
-
         }
 
         // Spherical Video Header (svhd)
@@ -1306,10 +1366,30 @@ class VideoMetadata
                     }
                 }
                 else if (0==memcmp(hdr+4, "sv3d", 4)) { // Spherical Video Box (sv3d)
+                    // 
+                    // aligned(8) class Box (unsigned int(32) boxtype,
+                    //                            optional unsigned int(8)[16] extended_type) {
+                    //        unsigned int(32) size;
+                    //        unsigned int(32) type = boxtype;
+                    //        if (size==1) {
+                    //            unsigned int(64) largesize;
+                    //        } else if (size==0) {
+                    //            // box extends to end of file
+                    //        }
+                    //        if (boxtype=='uuid') {
+                    //            unsigned int(8)[16] usertype = extended_type;
+                    //        }
+                    // }
+                    //
+                    // aligned(8) class FullBox(unsigned int(32) boxtype, unsigned int(8) v, bit(24) f) extends Box(boxtype) {
+                    //     unsigned int(8) version = v;
+                    //     bit(24) flags = f;
+                    // }
                     //
                     // aligned(8) class ProjectionDataBox(unsigned int(32) proj_type, unsigned int(8)version, unsigned int(24) flags)
                     //                        extends FullBox(proj_type, version, flags) {
                     // }
+                    //
                     //
                     // aligned(8) class SphericalVideoBox extends Box(．sv3d・) {
                     //
@@ -1333,25 +1413,30 @@ class VideoMetadata
                     //      }
                     // }
                     //
+                    uint32 const min_svhd_size = 12 + 1; // a full box with a null character
+                    uint32 const min_prhd_size = 12 + 3*4; // a full box with 3*sizeof(int32)
+                    uint32 const min_cbmp_size = 12 + 2*4; // cbmp : a full box with 2*sizeof(uint32)
+                    uint32 const min_equi_size = 12 + 4*4; // equi : a full box with 4*sizeof(uint32)
+                    uint32 const min_proj_size = 8 + min_prhd_size + min_cbmp_size;
                     rsize = 0;
-                    if (dataSize>=((12+1) + (8+(12+3*4)+(12+4*4)))) {
+                    if (dataSize>=(min_svhd_size + min_proj_size)) {
                         // svhd : full box
                         rsize = (uint32) fread(buf, 1, 8, file);
                         if (8==rsize && 0==memcmp(buf+4, "svhd", 4)) {
-                            uint32 svhd_size = BL_MAKE_4CC(buf[0], buf[1], buf[2], buf[3]);
-                            if ((12+1)<=svhd_size) {
+                            uint32 const svhd_size = BL_MAKE_4CC(buf[0], buf[1], buf[2], buf[3]);
+                            if (min_svhd_size<=svhd_size) {
                                 _fseeki64(file, svhd_size-8, SEEK_CUR);
 
                                 // proj : box
                                 uint32 proj_size = (uint32) fread(buf, 1, 8, file);
                                 if (8==proj_size && 0==memcmp(buf+4, "proj", 4)) {
                                     proj_size = BL_MAKE_4CC(buf[0], buf[1], buf[2], buf[3]);
-                                    if ((8+(12+3*4)+(12+4*4))<=proj_size && proj_size<=sizeof(buf)) {
+                                    if (min_proj_size<=proj_size && proj_size<=sizeof(buf)) {
                                         uint32 s1 = (uint32) fread(buf, 1, proj_size-8, file);
                                         if (s1==proj_size-8) {
                                             uint8* ptr = buf;
                                             s1 = BL_MAKE_4CC(ptr[0], ptr[1], ptr[2], ptr[3]);
-                                            if ((12+(4*3))<=s1 && 0==memcmp(ptr+4, "prhd", 4)) {
+                                            if (min_prhd_size<=s1 && 0==memcmp(ptr+4, "prhd", 4)) {
                                                 //
                                                 // Pose values are 16.16 fixed point values measuring rotation in degrees.
                                                 // pose_yaw_degrees   : ptr[12], ptr[13], ptr[14], ptr[15]
@@ -1361,7 +1446,7 @@ class VideoMetadata
 
                                                 ptr = buf + s1;
                                                 s1 = BL_MAKE_4CC(ptr[0], ptr[1], ptr[2], ptr[3]);
-                                                if ((12+(4*4))<=s1 && 0==memcmp(ptr+4, "equi", 4)) { // Equirectangular Projection Box
+                                                if (min_equi_size<=s1 && 0==memcmp(ptr+4, "equi", 4)) { // Equirectangular Projection Box
                                                     metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
                                                     longitude_ = 360;
                                                     latitude_south_  = -90;
@@ -1378,7 +1463,7 @@ class VideoMetadata
                                                     uint32 const projection_bounds_right  = BL_MAKE_4CC(ptr[24], ptr[25], ptr[26], ptr[27]);
                                                     if (0!=projection_bounds_left || 0!=projection_bounds_right) {
                                                         if (projection_bounds_right<(0xffffffff-projection_bounds_left)) {
-                                                            longitude_ = (int)(360.0 * (1.0 - ((double)(projection_bounds_left + projection_bounds_right))/(double)0xffffffff));
+                                                            longitude_ = (int) (360.0 * (1.0 - ((double) (projection_bounds_left+projection_bounds_right))/(double)0xffffffff));
                                                             if (longitude_>360)
                                                                 longitude_ = 360;
                                                         }
@@ -1400,11 +1485,32 @@ class VideoMetadata
                                                         }
                                                     }
                                                 }
-                                                else if (0==memcmp(buf+4, "cbmp", 4)) { // Cubemap Projection Box
-                                                    // ???
+                                                else if (min_cbmp_size<=s1 && 0==memcmp(buf+4, "cbmp", 4)) { // Cubemap Projection Box
+                                                    //
+                                                    // aligned(8) class CubemapProjection ProjectionDataBox(．cbmp・, 0, 0) {
+                                                    //      unsigned int(32) layout;  0 for now
+                                                    //      unsigned int(32) padding; number of pixels to pad from the edge of each cube face
+                                                    // }
+                                                    //
+                                                    // uint32 const layout = BL_MAKE_4CC(ptr[12], ptr[13], ptr[14], ptr[15]);
+                                                    // uint32 const padding = BL_MAKE_4CC(ptr[16], ptr[17], ptr[18], ptr[19]);
+                                                    //
                                                 }
                                                 else if (0==memcmp(buf+4, "mshp", 4)) { // Mesh Projection Box
-                                                    // ???
+                                                    //
+                                                    // aligned(8) class MeshProjection ProjectionDataBox(．mshp・, 0, 0) {
+                                                    //    unsigned int(32) crc;
+                                                    //    unsigned int(32) encoding_four_cc;
+                                                    //
+                                                    //    // All bytes below this point are compressed according to
+                                                    //    // the algorithm specified by the encoding_four_cc field.
+                                                    //    MeshBox() meshes[]; // At least 1 mesh box must be present.
+                                                    //    Box(); // further boxes as needed
+                                                    // }
+                                                    //
+                                                    // uint32 const crc = BL_MAKE_4CC(ptr[12], ptr[13], ptr[14], ptr[15]);
+                                                    // uint32 const encoding_four_cc = BL_MAKE_4CC(ptr[16], ptr[17], ptr[18], ptr[19]);
+                                                    //
                                                 }
                                             }
                                         }
@@ -2189,8 +2295,15 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
                     // equivalent information, with V2 taking priority when they differ.
                 case 0x7670: { // Projection master element
                         EBML_GoogleJump GJump;
-                        if (!GJump.ParseV2(file, size))
+                        if (GJump.ParseV2(file, size)) {
+                            metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
+                            longitude_ = GJump.longitude;
+                            latitude_south_  = GJump.latitude_south;
+                            latitude_north_  =  GJump.latitude_north;
+                        }
+                        else {
                             return false;
+                        }
                     }
                     break;
 
@@ -2538,9 +2651,10 @@ public:
                 return false;
 
             // google jump specified stereo mode
-            if (htc::VIDEO_SOURCE_GOOGLE_JUMP==metadata_source_)
+            if (htc::VIDEO_SOURCE_GOOGLE_JUMP==metadata_source_ ||
+                htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2==metadata_source_)
                 return true;
-
+#if 0
             //
             // Important Note -andre 2016.06.30
             // There are still mysterious H264 bit stream that it can not be parsed
@@ -2705,7 +2819,7 @@ public:
             free(h264);
             if (-1==stereo_mode_)
                 stereo_mode_ = stereo_mode_bak;
-
+#endif
             return true;
         }
 
@@ -2752,6 +2866,7 @@ bool VideoTrack::SetFilePath(wchar_t const* wfullpath,
                     assert((formatCtx->duration/1000)==duration_);
                 }
             }
+
             avformat_close_input(&formatCtx);
         }
         duration_end_ = duration_;

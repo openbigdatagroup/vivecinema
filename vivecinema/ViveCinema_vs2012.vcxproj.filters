@@ -41,6 +41,7 @@
     <ClInclude Include="resource.h">
       <Filter>resource</Filter>
     </ClInclude>
+    <ClInclude Include="AVStream.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="resource">

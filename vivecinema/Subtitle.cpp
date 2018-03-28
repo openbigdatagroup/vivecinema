@@ -2087,9 +2087,9 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
     if (1==totalStyles_) {
         // subject to :
         // TEXT_DEFAULT_DISPLAY_HEIGHT_RATIO_PER_MILLI/1000 = default_style.Fontsize*font_size_adj_num/(playResY_*font_size_adj_den);
-        font_size_adj_num = playResY_*font_size_adj_den*TEXT_DEFAULT_DISPLAY_HEIGHT_RATIO_PER_MILLI/(1000*default_style.Fontsize);
-        if (font_size_adj_num<font_size_adj_den)
-            font_size_adj_num = font_size_adj_den;
+//        font_size_adj_num = playResY_*font_size_adj_den*TEXT_DEFAULT_DISPLAY_HEIGHT_RATIO_PER_MILLI/(1000*default_style.Fontsize);
+//        if (font_size_adj_num<font_size_adj_den)
+//            font_size_adj_num = font_size_adj_den;
     }
 
     // prevent over estimate for full frame 3D
@@ -3123,7 +3123,7 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
         dial_rect.marginL = (dialogue.MarginL!=0) ? dialogue.MarginL:style.MarginL;
         dial_rect.marginR = (dialogue.MarginR!=0) ? dialogue.MarginR:style.MarginR;
         dial_rect.marginV = (dialogue.MarginV!=0) ? dialogue.MarginV:style.MarginV;
-
+#if 0
         // error check
         if ((100*dial_rect.marginL)>(5*playResX_)) {
             dial_rect.marginL = 5*playResX_/100;
@@ -3134,7 +3134,7 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
         if ((100*dial_rect.marginV)>(3*playResY_)) {
             dial_rect.marginV = 3*playResY_/100;
         }
-
+#endif
         // rescale
         dial_rect.marginL = dial_rect.marginL*corrected_PlayResX/playResX_;
         dial_rect.marginR = dial_rect.marginR*corrected_PlayResX/playResX_;

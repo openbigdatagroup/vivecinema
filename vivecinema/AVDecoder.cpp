@@ -2267,16 +2267,27 @@ int AVDecoder::StreamingAudio(uint8* dst, int maxSize, int frames, float& gain, 
             }
             else if (0==audioBufferFlushing_) {
                 timeAudioCrossfade_ = curr_time + AUDIO_FADE_IN_TIME;
+
+                int const at_time = (int) ((audioPutPTS_-startTime_)/1000);
+                int lag_time = 0;
                 if (0==timeInterruptSysTime_) {
                     timeInterruptSysTime_ = curr_time;
+                    lag_time = (int) av_rescale(max_frames-frames, AV_TIME_BASE, audioInfo_.SampleRate);
 #ifdef BL_AVDECODER_VERBOSE
-                    int ms = (int) ((audioPutPTS_-startTime_)/1000); if (ms<0) ms = 0;
+                    int ms = at_time; if (ms<0) ms = 0;
                     int ss = ms/1000; ms %= 1000;
                     int mm = ss/60; ss %= 60;
                     int hh = mm/60; mm %= 60;
                     BL_LOG("** audio interrupt at %d:%02d:%02d:%03d!!! (get:%lli put:%lli frames:%d)\n",
-                            hh, mm, ss, ms, (audioGetPTS_-startTime_)/1000, (audioPutPTS_-startTime_)/1000, max_frames);
+                           hh, mm, ss, ms, (audioGetPTS_-startTime_)/1000, (audioPutPTS_-startTime_)/1000, max_frames);
 #endif
+                }
+                else {
+                    lag_time = (int) ((curr_time-timeInterruptSysTime_)/100);
+                }
+
+                if (NULL!=host_) {
+                    host_->OnAudioInterrupt(id_, lag_time, at_time);
                 }
             }
         }
@@ -2323,7 +2334,7 @@ bool AVDecoder::VideoThread_()
             }
 #endif
             int64_t const cur_time = av_gettime();
-            bool frame_in_time = (0==timeStartSysTime_) || (timeStartSysTime_+videoPutPTS_+10000)>cur_time;
+            bool frame_in_time = (0==timeStartSysTime_) || (timeStartSysTime_+videoPutPTS_+15000)>cur_time;
 
             // decode video frame
             if (videoFramePut_<=NUM_VIDEO_BUFFER_FRAMES || frame_in_time || transcodeMode_ ||
@@ -2348,6 +2359,9 @@ bool AVDecoder::VideoThread_()
             else { // discard this frame, since it's decoded so late:-(
                 videoDecoder_.discard_frame();
                 ++consecutive_drop_frames;
+                if (host_) {
+                    host_->OnVideoLateFrame(id_, consecutive_drop_frames, (int)((videoPutPTS_-startTime_)/1000));
+                }
                 if (0==frame_buffer_count) {
                     videoGetPTS_ = videoPutPTS_;
                 }
@@ -3282,6 +3296,15 @@ bool AVDecoder::AudioSubtitleThread_()
                 // advance pointer and pts
                 audioBufferPut_ += fill_bytes;
                 audioPutPTS_ = pts2;
+
+                // audio late frame
+
+                if (0<timeStartSysTime_ && NULL!=host_) {
+                    int64_t const cur_time = av_gettime();
+                    if ((timeStartSysTime_+pts1)<cur_time) {
+                        host_->OnAudioLateFrame(id_, (int)((pts1-startTime_)/1000));
+                    }
+                }
 
                 if (0==timeInterruptSysTime_) {
                     if (cur_data_size<=0) {
@@ -4636,19 +4659,15 @@ bool AVDecoder::UpdateFrame()
                 //  90 fps = 11111/2 =  5555
                 // 120 fps =  8333/2 =  4166
                 int64_t const app_half_frametime = 5000;
-                int64_t const video_pts = cur_time - timeStartSysTime_;
-                int slot = videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES;
-                if (decodedFrames_[slot].PTS<=(video_pts+app_half_frametime)) {
+                int64_t const cur_pts = cur_time - timeStartSysTime_;
+                int frameId = videoFrameGet_%NUM_VIDEO_BUFFER_FRAMES;
+                if (decodedFrames_[frameId].PTS<(cur_pts+app_half_frametime)) {
                     video_update = true;
-                    //
-                    // to prevent image overwrite, move videoFrameGet_ before host_->FrameUpdate() returned
-                    //
                     int next_get = videoFrameGet_ + 1;
                     while (next_get<videoFramePut_ && /*0==transcodeMode_ &&*/
-                           video_pts>=decodedFrames_[next_get%NUM_VIDEO_BUFFER_FRAMES].PTS) {
-                        videoDecoder_.finish_frame(decodedFrames_[slot]);
-                        slot = next_get%NUM_VIDEO_BUFFER_FRAMES;
-                        ++next_get;
+                           cur_pts>=decodedFrames_[next_get%NUM_VIDEO_BUFFER_FRAMES].PTS) {
+                        videoDecoder_.finish_frame(decodedFrames_[frameId]);
+                        frameId = (next_get++)%NUM_VIDEO_BUFFER_FRAMES;
                     }
 
 #ifdef BL_AVDECODER_VERBOSE
@@ -4657,12 +4676,12 @@ bool AVDecoder::UpdateFrame()
                     }
 #endif
                     if (NULL!=host_) {
-                        host_->FrameUpdate(id_, decodedFrames_[slot]);
+                        host_->FrameUpdate(id_, decodedFrames_[frameId]);
                     }
-                    videoGetPTS_ = decodedFrames_[slot].PTS; // + video frame duration?
+                    videoGetPTS_ = decodedFrames_[frameId].PTS; // + video frame duration?
 
                     // finish this frame
-                    videoDecoder_.finish_frame(decodedFrames_[slot]);
+                    videoDecoder_.finish_frame(decodedFrames_[frameId]);
 
                     // only now you can move on videoFrameGet_
                     videoFrameGet_ = next_get;
@@ -4695,14 +4714,6 @@ bool AVDecoder::UpdateFrame()
                                               subtitleRects_, subtitleRectCount_);
                     }
                     ++subtitleGet_;
-                }
-            }
-
-            if (STATUS_PLAYING==status_ && timeInterruptSysTime_>0 && NULL!=host_) {
-                assert(0==interruptRequest_);
-                int const lag_time = int((cur_time-timeInterruptSysTime_)/1000);
-                if (0==audioQueue_.Size() || 0==videoQueue_.Size() || lag_time>0) {
-                    host_->OnDataLag(id_, lag_time);
                 }
             }
         }

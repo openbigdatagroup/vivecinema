@@ -37,6 +37,7 @@
 #define AV_DECODER_H
 
 #include "Subtitle.h"
+#include "AVStream.h"
 #include "Audio.h"
 
 extern "C" {
@@ -245,57 +246,6 @@ struct VideoOpenOption {
     }
 };
 
-// customized input stream (via AVIOContext)
-class IInputStream
-{
-    mutable std::mutex mutex_;
-    volatile int refCount_;
-
-protected:
-    IInputStream():mutex_(),refCount_(1) {}
-    virtual ~IInputStream() { assert(refCount_<=0); }
-
-public:
-    int RefCount() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return refCount_;
-    }
-    int AddRef() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        BL_ASSERT(refCount_>0); // you see dead people?
-        return ++refCount_; 
-    }
-    int Release() {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            BL_ASSERT(refCount_>0); // you really did?
-            if (--refCount_>0)
-                return refCount_;
-        } // must unlock before kill this->mutex_
-        delete this; // kill self
-        return 0;
-    }
-
-    // name
-    virtual char const* Name() const { return "InputStream"; }
-
-    // url
-    virtual char const* URL() const = 0;
-
-    // ready to read from start, will be called when stream is opened.
-    virtual bool Rewind() = 0; 
-
-    // read data and return number of bytes read.
-    virtual int Read(uint8_t* buf, int buf_size) = 0;
-
-    // like fseek()/_fseeki64(), whence = SEEK_SET(mostly), SEEK_CUR or SEEK_END
-    // but unlike fseek()/_fseeki64(), it return stream position.
-    virtual int64_t Seek(int64_t offset, int whence) = 0;
-
-    // return stream length.
-    virtual int64_t Size() = 0;
-};
-
 // host interface to be implemented
 class IAVDecoderHost
 {
@@ -328,8 +278,14 @@ public:
     // [render thread/callback] when video is ended and then reset
     virtual void OnReset(int decoder_id) = 0;
 
-    // [render thread/callback] when audio/video data lag
-    virtual void OnDataLag(int decoder_id, int lagtime) = 0;
+    // [video decoding thread/callback] when decoding video frame too late
+    virtual void OnVideoLateFrame(int decoder_id, int consecutives, int video_pts) = 0;
+
+    // [audio decoding thread/callback] when decoding audio frame too late
+    virtual void OnAudioLateFrame(int decoder_id, int audio_pts) = 0;
+
+    // [audio render thread/callback] when audio data lag
+    virtual void OnAudioInterrupt(int decoder_id, int lagtime, int audio_pts) = 0;
 
     // [audio device thread] this is the callback when AVDecoder::ConfirmAudioSetting()
     // implement should do :
