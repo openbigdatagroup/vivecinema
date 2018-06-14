@@ -283,12 +283,12 @@ may have xml header: <?xml version="1.0"?>
      </rdf:li>
 
      //... (same <rdf:li> may appear several times!?)
-     
+
     </rdf:Bag>
    </xmpMM:Pantry>
 
    //...
-  
+
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
@@ -623,24 +623,30 @@ struct FB360Metadata : public XMLParser {
 // andre : have no chances to verify mkv spherical video yet.
 //
 struct EBML_GoogleJump {
-    int  longitude;
-    int  latitude_south;
-    int  latitude_north;
-    int  stereo_mode;
+    int longitude;
+    int latitude_south;
+    int latitude_north;
+    int stereo_mode;
+    
+    // v2
+    int proj_type;
+    int cubemap_layout, cubemap_padding;
 
+    // v1
     bool check_track;
     bool check_spherical_uuid;
     bool check_spherical_video_tag;
     bool check_spherical_video_v2_RFC;
 
-    EBML_GoogleJump():longitude(0),latitude_south(0),latitude_north(0),stereo_mode(0),
+    EBML_GoogleJump():proj_type(0),cubemap_layout(0),cubemap_padding(0),
+        longitude(0),latitude_south(0),latitude_north(0),stereo_mode(0),
         check_track(false),check_spherical_uuid(false),check_spherical_video_tag(false),check_spherical_video_v2_RFC(false) {}
-
+/*
     bool IsValid() const {
         return check_track && check_spherical_uuid && check_spherical_video_tag &&
                0<longitude && -90<=latitude_south && latitude_south<latitude_north && latitude_north<=90;
     }
-
+*/
     bool ParseEBML_Target_(FILE* file, uint64 data_size) {
         // https://www.matroska.org/technical/specs/index.html#Targets
         uint64 read_bytes(0), size;
@@ -736,6 +742,7 @@ struct EBML_GoogleJump {
                                                         latitude_south,
                                                         latitude_north)) {
                         stereo_mode = GJump.stereo_mode;
+                        proj_type = 1;
                     }
                 }
 
@@ -788,8 +795,8 @@ struct EBML_GoogleJump {
         //       projection_bounds_bottom = 0
         //       projection_bounds_left = 0
         //       projection_bounds_right = 0
+        proj_type = cubemap_layout = cubemap_padding = 0;
         longitude = latitude_south = latitude_north = 0;
-        uint32 ProjectionType = BL_BAD_UINT32_VALUE;
         uint64 read_bytes(0), size(0);
         uint32 a, b, header;
         while (read_bytes<data_size) {
@@ -803,11 +810,14 @@ struct EBML_GoogleJump {
                 //  3: Mesh
                 //
                 check_spherical_video_v2_RFC = true;
-                ProjectionType = EBML_element_read_uint(file, (uint32)size);
-                if (1==ProjectionType) {
-                    longitude  = 360;
+                proj_type = (int) EBML_element_read_uint(file, (uint32)size);
+                if (1==proj_type) {
+                    longitude = 360;
                     latitude_south = -90;
                     latitude_north = 90;
+                }
+                else {
+                    cubemap_layout = cubemap_padding = 0;
                 }
             }
             else if (0x7672==header) { // ProjectionPrivate(optional)
@@ -833,9 +843,9 @@ struct EBML_GoogleJump {
                 //   Mesh Projection Box ('mshp') for Mesh
                 //
                 uint8 buf[1024];
-                if (0<ProjectionType && ProjectionType<=3 && size<=sizeof(buf)) {
+                if (0<proj_type && proj_type<=3 && size<=sizeof(buf)) {
                     if (size==fread(buf, 1, (size_t)size, file)) {
-                        if (1==ProjectionType && 20<=size) {
+                        if (1==proj_type && 20<=size) {
                             uint32 const projection_bounds_top    = BL_MAKE_4CC(buf[4], buf[5], buf[6], buf[7]);
                             uint32 const projection_bounds_bottom = BL_MAKE_4CC(buf[8], buf[9], buf[10], buf[11]);
                             uint32 const projection_bounds_left   = BL_MAKE_4CC(buf[12], buf[13], buf[14], buf[15]);
@@ -864,11 +874,11 @@ struct EBML_GoogleJump {
                                 }
                             }
                         }
-                        else if (2==ProjectionType && 12<=size) {
-                            // uint32 const layout = BL_MAKE_4CC(buf[4], buf[5], buf[6], buf[7]);
-                            // uint32 const padding = BL_MAKE_4CC(buf[8], buf[9], buf[10], buf[11]);
+                        else if (2==proj_type && 12<=size) {
+                            cubemap_layout = BL_MAKE_4CC(buf[4], buf[5], buf[6], buf[7]);
+                            cubemap_padding = BL_MAKE_4CC(buf[8], buf[9], buf[10], buf[11]);
                         }
-                        else if (3==ProjectionType) {
+                        else if (3==proj_type) {
                             // ???
                         }
                     }
@@ -904,16 +914,36 @@ class VideoMetadata
 {
     uint64 file_size_;
     uint64 mdat_pos_, mdat_size_;
-    int  nalu_length_size_;
+    int nalu_length_size_;
     int parsing_track_no_; // 1-base
 
     htc::SA3D sa3d_;
 
     htc::VIDEO_SOURCE metadata_source_;
-    int  longitude_;
-    int  latitude_south_;
-    int  latitude_north_;
-    int  stereo_mode_; // stereo3D 0:mono 1:top-bottom 2:left-right 3:bottom-top 4:right-left
+
+    // extended projection type
+    int proj_type_; // 0:default(plane or unknown) 1:equirectangular 2:cubemap
+
+    int stereo_mode_; // stereo3D 0:mono 1:top-bottom 2:left-right 3:bottom-top 4:right-left
+
+    // projection parameters
+    union proj_param {
+        struct equi { // equirectangular projection
+            int longitude;
+            int latitude_south;
+            int latitude_north;
+        } equirectangular;
+
+        struct cubic {
+            uint32 layout;
+            uint32 padding;
+        } cubemap;
+
+    } proj_params_;
+
+    // extended projection type
+    uint32 ext_proj_param1_;
+    uint32 ext_proj_param2_;
 
     uint8 ftyp_; // type check : 1="ftyp", 2=Matroska, 3:RIFF
     uint8 moov_; // "moov"
@@ -1447,10 +1477,8 @@ class VideoMetadata
                                                 ptr = buf + s1;
                                                 s1 = BL_MAKE_4CC(ptr[0], ptr[1], ptr[2], ptr[3]);
                                                 if (min_equi_size<=s1 && 0==memcmp(ptr+4, "equi", 4)) { // Equirectangular Projection Box
-                                                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
-                                                    longitude_ = 360;
-                                                    latitude_south_  = -90;
-                                                    latitude_north_  =  90;
+                                                    
+                                                    int longitude(360), latitude_south(-90), latitude_north(90);
 
                                                     //
                                                     // The projection bounds use 0.32 fixed point values.
@@ -1463,38 +1491,45 @@ class VideoMetadata
                                                     uint32 const projection_bounds_right  = BL_MAKE_4CC(ptr[24], ptr[25], ptr[26], ptr[27]);
                                                     if (0!=projection_bounds_left || 0!=projection_bounds_right) {
                                                         if (projection_bounds_right<(0xffffffff-projection_bounds_left)) {
-                                                            longitude_ = (int) (360.0 * (1.0 - ((double) (projection_bounds_left+projection_bounds_right))/(double)0xffffffff));
-                                                            if (longitude_>360)
-                                                                longitude_ = 360;
+                                                            longitude = (int) (360.0 * (1.0 - ((double) (projection_bounds_left+projection_bounds_right))/(double)0xffffffff));
+                                                            if (longitude>360)
+                                                                longitude = 360;
                                                         }
                                                     }
 
                                                     if (0!=projection_bounds_top || 0!=projection_bounds_bottom) {
                                                         if (projection_bounds_bottom<(0xffffffff-projection_bounds_top)) {
                                                             if (0!=projection_bounds_top) {
-                                                                latitude_north_ = (int) (90.0 - 180.0*((double)projection_bounds_top/(double)0xffffffff)); 
-                                                                if (latitude_north_>90)
-                                                                    latitude_north_ = 90;
+                                                                latitude_north = (int) (90.0 - 180.0*((double)projection_bounds_top/(double)0xffffffff)); 
+                                                                if (latitude_north>90)
+                                                                    latitude_north = 90;
                                                             }
 
                                                             if (0!=projection_bounds_bottom) {
-                                                                latitude_south_ = (int) (-90.0 + 180.0*((double)projection_bounds_bottom/(double)0xffffffff));
-                                                                if (latitude_south_<-90)
-                                                                    latitude_south_ = 90;
+                                                                latitude_south = (int) (-90.0 + 180.0*((double)projection_bounds_bottom/(double)0xffffffff));
+                                                                if (latitude_south<-90)
+                                                                    latitude_south = 90;
                                                             }
                                                         }
                                                     }
+
+                                                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
+                                                    proj_type_ = 1;
+                                                    proj_params_.equirectangular.longitude = longitude;
+                                                    proj_params_.equirectangular.latitude_north = latitude_north;
+                                                    proj_params_.equirectangular.latitude_south = latitude_south;
                                                 }
-                                                else if (min_cbmp_size<=s1 && 0==memcmp(buf+4, "cbmp", 4)) { // Cubemap Projection Box
+                                                else if (min_cbmp_size<=s1 && 0==memcmp(ptr+4, "cbmp", 4)) { // Cubemap Projection Box
                                                     //
                                                     // aligned(8) class CubemapProjection ProjectionDataBox(¡¥cbmp¡¦, 0, 0) {
                                                     //      unsigned int(32) layout;  0 for now
                                                     //      unsigned int(32) padding; number of pixels to pad from the edge of each cube face
                                                     // }
                                                     //
-                                                    // uint32 const layout = BL_MAKE_4CC(ptr[12], ptr[13], ptr[14], ptr[15]);
-                                                    // uint32 const padding = BL_MAKE_4CC(ptr[16], ptr[17], ptr[18], ptr[19]);
-                                                    //
+                                                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
+                                                    proj_type_ = 2;
+                                                    proj_params_.cubemap.layout = BL_MAKE_4CC(ptr[12], ptr[13], ptr[14], ptr[15]);
+                                                    proj_params_.cubemap.padding = BL_MAKE_4CC(ptr[16], ptr[17], ptr[18], ptr[19]);
                                                 }
                                                 else if (0==memcmp(buf+4, "mshp", 4)) { // Mesh Projection Box
                                                     //
@@ -1855,7 +1890,7 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
                 if (video_type==media_type) {
                     // spherical video RFC2 = "moov.trak.mdia.minf.stbl.stsd.****.sv3d"
                     // spherical video RFC2 = "moov.trak.mdia.minf.stbl.stsd.****.st3d"
-                    // (**** = avc1, avc2 or hvc1)
+                    // (**** = avc1, avc2, mp4a, apcn or hvc1)
                     if (!moov_trak_mdia_minf_stbl_stsd_VideoSampleEntry(file, hdr+4, boxSize-8))
                         return false;
                 }
@@ -2052,7 +2087,7 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
 
                 uint32 const xml_size = boxSize - 8 - 16;
                 if (0==memcmp(uuid, SPHERICAL_UUID_ID, 16) && xml_size<4096) {
-                    longitude_ = latitude_south_ = latitude_north_ = 0;
+                    memset(&proj_params_, 0, sizeof(proj_params_));
                     void* const buf = malloc(xml_size);
                     if (NULL!=buf) {
                         if (xml_size==fread(buf, 1, xml_size, file)) {
@@ -2071,12 +2106,18 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
                                 --xml_end;
 
                             GoogleJumpMetadata GJump;
-                            if (GJump.Parse(xml_begin, xml_end) &&
-                                GJump.spherical.GetViewCoverage(longitude_,
-                                                                latitude_south_,
-                                                                latitude_north_)) {
-                                metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP;
-                                stereo_mode_ = GJump.stereo_mode;
+                            if (GJump.Parse(xml_begin, xml_end)) {
+                                int longitude(360), latitude_south(-90), latitude_north(90);
+                                if (GJump.spherical.GetViewCoverage(longitude,
+                                                                    latitude_south,
+                                                                    latitude_north)) {
+                                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP;
+                                    proj_type_ = 1;
+                                    proj_params_.equirectangular.longitude = longitude;
+                                    proj_params_.equirectangular.latitude_south = latitude_south;
+                                    proj_params_.equirectangular.latitude_north = latitude_north;
+                                    stereo_mode_ = GJump.stereo_mode;
+                                }
                             }
                         }
                         else {
@@ -2218,14 +2259,19 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
                         }
 
                         if (xml_begin<xml_end) {
-                            longitude_ = latitude_south_ = latitude_north_ = 0;
                             VirtueRealPornMetadata porn;
-                            if (porn.Parse(xml_begin, xml_end) &&
-                                porn.gpano.GetViewCoverage(longitude_,
-                                                           latitude_south_,
-                                                           latitude_north_)) {
-                                metadata_source_ = htc::VIDEO_SOURCE_VIRTUALREAL_PORN;
-                                stereo_mode_ = porn.stereo_mode;
+                            if (porn.Parse(xml_begin, xml_end)) {
+                                int longitude(360), latitude_south(-90), latitude_north(90);
+                                if (porn.gpano.GetViewCoverage(longitude,
+                                                               latitude_south,
+                                                               latitude_north)) {
+                                    metadata_source_ = htc::VIDEO_SOURCE_VIRTUALREAL_PORN;
+                                    proj_type_ = 1;
+                                    proj_params_.equirectangular.longitude = longitude;
+                                    proj_params_.equirectangular.latitude_south = latitude_south;
+                                    proj_params_.equirectangular.latitude_north = latitude_north;
+                                    stereo_mode_ = porn.stereo_mode;
+                                }
                             }
 
                             //FILE* xmp = fopen("uuid.xmp", "wb");
@@ -2296,10 +2342,23 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
                 case 0x7670: { // Projection master element
                         EBML_GoogleJump GJump;
                         if (GJump.ParseV2(file, size)) {
-                            metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
-                            longitude_ = GJump.longitude;
-                            latitude_south_  = GJump.latitude_south;
-                            latitude_north_  =  GJump.latitude_north;
+                            if (GJump.check_spherical_video_v2_RFC) {
+                                if (1==GJump.proj_type) { // Equirectangular
+                                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
+                                    proj_type_ = 1;
+                                    proj_params_.equirectangular.longitude = GJump.longitude;
+                                    proj_params_.equirectangular.latitude_south = GJump.latitude_south;
+                                    proj_params_.equirectangular.latitude_north = GJump.latitude_north;
+                                }
+                                else if (2==GJump.proj_type) { // Cubemap
+                                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP_RFC2;
+                                    proj_type_ = 2;
+                                    proj_params_.cubemap.layout = GJump.cubemap_layout;
+                                    proj_params_.cubemap.padding = GJump.cubemap_padding;
+                                }
+                                else if (3==GJump.proj_type) { // Mesh
+                                }
+                            }
                         }
                         else {
                             return false;
@@ -2420,22 +2479,28 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
             header = EBML_element_header(a, file); read_bytes += a;
             size = EBML_element_size(b, file); read_bytes += b;
             if (0x1254c367==parent && 0x7373==header) {
+                // spherical video v1. equirectangular only.
                 EBML_GoogleJump GJump;
-                if (!GJump.Parse(file, size))
-                    return false;
-
-                if (GJump.IsValid()) {
-                    metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP;
-                    longitude_ = GJump.longitude;
-                    latitude_south_ = GJump.latitude_south;
-                    latitude_north_ = GJump.latitude_north;
-                    stereo_mode_ = GJump.stereo_mode;
+                if (GJump.Parse(file, size)) {
+                    if (GJump.check_track && GJump.check_spherical_uuid && GJump.check_spherical_video_tag &&
+                        0<GJump.longitude && -90<=GJump.latitude_south && GJump.latitude_north<=90 &&
+                        GJump.latitude_south<GJump.latitude_north) {
+                        metadata_source_ = htc::VIDEO_SOURCE_GOOGLE_JUMP;
+                        proj_type_ = 1;
+                        proj_params_.equirectangular.longitude = GJump.longitude;
+                        proj_params_.equirectangular.latitude_south = GJump.latitude_south;
+                        proj_params_.equirectangular.latitude_north = GJump.latitude_north;
+                        stereo_mode_ = GJump.stereo_mode;
+                    }
 
                     read_bytes += size;
                     if (read_bytes<tags_size) {
                         _fseeki64(file, tags_size - read_bytes, SEEK_CUR);
                     }
                     return true;
+                }
+                else {
+                    return false;
                 }
             }
             else {
@@ -2493,23 +2558,33 @@ public:
         sa3d_(),
 
         metadata_source_(htc::VIDEO_SOURCE_UNKNOWN),
-        longitude_(0),
-        latitude_south_(0),
-        latitude_north_(0),
+        proj_type_(0), // default
         stereo_mode_(-1),
 
         ftyp_(0),
         moov_(0),
         full3D_(0),
         sand_(0)
-        {}
+        { memset(&proj_params_, 0, sizeof(proj_params_)); }
 
     bool GetSphericalAngles(int& longi, int& lati_south, int& lati_north) const {
-        if (longitude_>0 && -90<=latitude_south_ && latitude_north_<=90 &&
-            latitude_south_<latitude_north_) {
-            longi = longitude_;
-            lati_south = latitude_south_;
-            lati_north = latitude_north_;
+        if (1==proj_type_ &&
+            proj_params_.equirectangular.longitude>0 && 
+            -90<=proj_params_.equirectangular.latitude_south &&
+            proj_params_.equirectangular.latitude_north<=90 &&
+            proj_params_.equirectangular.latitude_south<proj_params_.equirectangular.latitude_north) {
+            longi = proj_params_.equirectangular.longitude;
+            lati_south = proj_params_.equirectangular.latitude_south;
+            lati_north = proj_params_.equirectangular.latitude_north;
+            return true;
+        }
+        return false;
+    }
+
+    bool IsCubeMap(uint32& layout, uint32& padding) const {
+        if (2==proj_type_) {
+            layout  = proj_params_.cubemap.layout;
+            padding = proj_params_.cubemap.padding;
             return true;
         }
         return false;
@@ -2532,7 +2607,8 @@ public:
         sa3d_.Reset();
 
         metadata_source_ = htc::VIDEO_SOURCE_UNKNOWN;
-        longitude_ = latitude_south_ = latitude_north_ = 0;
+        memset(&proj_params_, 0, sizeof(proj_params_));
+        proj_type_ = 0;
         stereo_mode_ = -1;
 
         ftyp_ = moov_ = full3D_ = 0;
@@ -2914,28 +2990,50 @@ bool VideoTrack::SetFilePath(wchar_t const* wfullpath,
         if (metadata.Parse(file, file_size)) {
             sa3d_ = metadata.SpatialAudio3D();
             source_ = metadata.Source();
-            if (metadata.GetSphericalAngles(spherical_longitude_,
-                                            spherical_latitude_south_,
-                                            spherical_latitude_north_)) {
+            if (metadata.GetSphericalAngles(equirect_longitude_,
+                                            equirect_latitude_south_,
+                                            equirect_latitude_north_)) {
                 switch (metadata.Stereo3D())
                 {
                 case 1:
-                    type_intrinsic_ = VIDEO_TYPE_SPHERICAL_3D_TOPBOTTOM;
+                    type_intrinsic_ = VIDEO_TYPE_EQUIRECT_3D_TOPBOTTOM;
                     break;
 
                 case 2:
-                    type_intrinsic_ = VIDEO_TYPE_SPHERICAL_3D_LEFTRIGHT;
+                    type_intrinsic_ = VIDEO_TYPE_EQUIRECT_3D_LEFTRIGHT;
                     break;
 
                 default: // default = mono
-                    type_intrinsic_ = VIDEO_TYPE_SPHERICAL;
+                    type_intrinsic_ = VIDEO_TYPE_EQUIRECT;
+                    break;
+                }
+            }
+            else if (metadata.IsCubeMap(cubemap_layout_, cubemap_padding_)) {
+                //
+                // https://github.com/google/spatial-media/blob/master/docs/spherical-video-v2-rfc.md#semantics-3
+                //   layout is a 32-bit unsigned integer describing the layout of cube faces.
+                //   The values 0 to 255 are reserved for current and future layouts.
+                //
+                assert(cubemap_layout_<256);
+                switch (metadata.Stereo3D())
+                {
+                case 1:
+                    type_intrinsic_ = VIDEO_TYPE_CUBEMAP_3D_TOPBOTTOM;
+                    break;
+
+                case 2:
+                    type_intrinsic_ = VIDEO_TYPE_CUBEMAP_3D_LEFTRIGHT;
+                    break;
+
+                default: // default = mono
+                    type_intrinsic_ = VIDEO_TYPE_CUBEMAP;
                     break;
                 }
             }
             else {
-                spherical_longitude_ = 0;
-                spherical_latitude_south_ = 0;
-                spherical_latitude_north_ = 0;
+                equirect_longitude_ = 0;
+                equirect_latitude_south_ = 0;
+                equirect_latitude_north_ = 0;
                 switch (metadata.Stereo3D())
                 {
                 case 1:
@@ -3026,9 +3124,9 @@ bool VideoTrack::SetLiveStream(char const* name, char const* url, uint32 timeout
 
         // sv3d
         type_ = type_intrinsic_ = VIDEO_TYPE_2D;
-        spherical_longitude_ = 0;
-        spherical_latitude_south_ = 0;
-        spherical_latitude_north_ = 0;
+        equirect_longitude_ = 0;
+        equirect_latitude_south_ = 0;
+        equirect_latitude_north_ = 0;
 
         // sa3d
         //sa3d_.Reset();
@@ -3051,6 +3149,15 @@ static uint32 const crc_livestreams = mlabs::balai::CalcCRC("livestreams");
 static uint32 const crc_videopaths  = mlabs::balai::CalcCRC("videopaths");
 static uint32 const crc_videos      = mlabs::balai::CalcCRC("videos");
 
+static uint32 const crc_name = mlabs::balai::CalcCRC("name");
+static uint32 const crc_url  = mlabs::balai::CalcCRC("url");
+static uint32 const crc_st3d = mlabs::balai::CalcCRC("st3d");
+static uint32 const crc_sv3d = mlabs::balai::CalcCRC("sv3d"); // to be deprecated
+static uint32 const crc_sa3d = mlabs::balai::CalcCRC("sa3d");
+static uint32 const crc_proj = mlabs::balai::CalcCRC("proj");
+static uint32 const crc_layout = mlabs::balai::CalcCRC("layout");
+static uint32 const crc_padding = mlabs::balai::CalcCRC("padding");
+
 static uint32 const crc_180  = mlabs::balai::CalcCRC("180");
 static uint32 const crc_180SBS  = mlabs::balai::CalcCRC("180SBS");
 static uint32 const crc_180TB  = mlabs::balai::CalcCRC("180TB");
@@ -3059,6 +3166,11 @@ static uint32 const crc_360SBS  = mlabs::balai::CalcCRC("360SBS");
 static uint32 const crc_360TB  = mlabs::balai::CalcCRC("360TB");
 static uint32 const crc_SBS  = mlabs::balai::CalcCRC("SBS");
 static uint32 const crc_TB  = mlabs::balai::CalcCRC("TB");
+
+// app config
+static uint32 const crc_windows     = mlabs::balai::CalcCRC("windows");
+static uint32 const crc_libraries   = mlabs::balai::CalcCRC("libraries");
+    static uint32 const crc_video      = mlabs::balai::CalcCRC("video");
 
 class VRVideoConfigParser : public XMLParser
 {
@@ -3084,60 +3196,165 @@ public:
                 else if (crc_livestreams==loading_ || crc_videos==loading_) {
                     char const* name = NULL;
                     char const* url = NULL;
-                    uint32 sv3d(0), sa3d(0), timeout(4000);
+                    uint32 st3d(0), proj(0), sa3d(0);
+                    uint32 lon(0), lat(0); // 2 projection params
+                    uint32 timeout(4000);
                     for (int i=0; i<ele.NumAttribs; ++i) {
                         XML_Attrib const& att = ele.Attributes[i];
-                        if (NULL==name && 0==memcmp(att.Name, "name", 5)) {
+                        uint32 const attr_name = mlabs::balai::CalcCRC(att.Name);
+                        uint32 const attr_value = mlabs::balai::CalcCRC(att.Value);
+                        if (NULL==name && crc_name==attr_name) {
                             name = att.Value;
                         }
-                        else if (NULL==url && 0==memcmp(att.Name, "url", 4)) {
+                        else if (NULL==url && crc_url==attr_name) {
                             url = att.Value;
                         }
-                        else if (0==sv3d && 0==memcmp(att.Name, "sv3d", 5)) {
-                            uint32 const crc_sv3d = mlabs::balai::CalcCRC(att.Value);
-                            if (crc_180==crc_sv3d) {
-                                sv3d = 1;
+                        else if (crc_st3d==attr_name) {
+                            if (crc_TB==attr_value) {
+                                st3d = 1; // top-down
                             }
-                            else if (crc_180SBS==crc_sv3d) {
-                                sv3d = 2;
-                            }
-                            else if (crc_180TB==crc_sv3d) {
-                                sv3d = 3;
-                            }
-                            else if (crc_360==crc_sv3d) {
-                                sv3d = 4;
-                            }
-                            else if (crc_360SBS==crc_sv3d) {
-                                sv3d = 5;
-                            }
-                            else if (crc_360TB==crc_sv3d) {
-                                sv3d = 6;
-                            }
-                            else if (crc_SBS==crc_sv3d) {
-                                sv3d = 7;
-                            }
-                            else if (crc_TB==crc_sv3d) {
-                                sv3d = 8;
+                            else if (crc_SBS==attr_value) {
+                                st3d = 2; // left-right
                             }
                         }
-                        else if (0==sa3d && 0==memcmp(att.Name, "sa3d", 5)) {
-                            if (('F'==att.Value[0] || 'f'==att.Value[0]) &&
+                        else if (crc_proj==attr_name) {
+                            if (0==memcmp(att.Value, "equi", 5)) {
+                                proj = 1; // equirectangular
+                                lon = 360;
+                                lat = 180;
+                            }
+                            else if (0==memcmp(att.Value, "cbmp", 5)) {
+                                proj = 2; // cubemap
+                                lon = lat = 0;
+                            }
+                            else if (0==memcmp(att.Value, "eac", 4)) {
+                                proj = 3; // eac
+                                lon = 2; // youtube
+                                lat = 0;
+                            }
+                        }
+                        else if (crc_layout==attr_name) {
+                            if (1==proj) {
+                                int tmp = atoi(att.Value);
+                                if (46<tmp && tmp<=360) {
+                                    lon = tmp;
+                                    lat = 180;
+                                    if (('x'==att.Value[2]||'X'==att.Value[2])) {
+                                        tmp = atoi(att.Value+3);
+                                        if (40<tmp && tmp<=180) {
+                                            lat = tmp;
+                                        }
+                                    }
+                                    else if (('x'==att.Value[3]||'X'==att.Value[3])) {
+                                        tmp = atoi(att.Value+4);
+                                        if (40<tmp && tmp<=180) {
+                                            lat = tmp;
+                                        }
+                                    }
+                                }
+                            }
+                            else if (2==proj || 3==proj) {
+                                if ('3'==att.Value[0]) {
+                                    if (('x'==att.Value[1]||'X'==att.Value[1]) &&
+                                         '2'==att.Value[2] &&
+                                         '\0'==att.Value[3]) {
+                                        lon = 0;
+                                    }
+                                }
+                                else if ('2'==att.Value[0]) {
+                                    if (('x'==att.Value[1]||'X'==att.Value[1]) &&
+                                         '3'==att.Value[2] &&
+                                         0==memcmp(att.Value+3, "_offcenter", 11)) {
+                                        lon = 1;
+                                    }
+                                }
+                                else if ('Y'==att.Value[0]) {
+                                    if (('T'==att.Value[1]&&'\0'==att.Value[2]) ||
+                                         0==memcmp(att.Value+1, "ouTube", 7)) {
+                                        lon = 2;
+                                    }
+                                }
+                                else if ('y'==att.Value[0]) {
+                                    if (('t'==att.Value[1]&&'\0'==att.Value[2]) ||
+                                         0==memcmp(att.Value+1, "outube", 7)) {
+                                        lon = 2;
+                                    }
+                                }
+                            }
+                        }
+                        else if (crc_padding==attr_name) {
+                            if (2==proj || 3==proj) {
+                                lat = (uint32) atoi(att.Value);
+                            }
+                        }
+                        else if (crc_sa3d==attr_name) {
+                            if (('F'==att.Value[0]||'f'==att.Value[0]) &&
                                 ('u'==att.Value[1]) && 
-                                ('M'==att.Value[2] || 'm'==att.Value[2]) &&
-                                ('a'==att.Value[3]) && ('\0'==att.Value[4])) {
+                                ('M'==att.Value[2]||'m'==att.Value[2]) &&
+                                ('a'==att.Value[3]) &&
+                                '\0'==att.Value[4]) {
                                 sa3d = 1;
                             }
-                            else if (('a'==att.Value[0]) && ('m'==att.Value[1]) && 
-                                     ('b'==att.Value[2]) && ('i'==att.Value[3]) &&
-                                     ('x'==att.Value[4] || 'X'==att.Value[4]) &&
-                                     ('\0'==att.Value[5])) {
+                            else if ('a'==att.Value[0] &&
+                                     'm'==att.Value[1] && 
+                                     'b'==att.Value[2] && 
+                                     'i'==att.Value[3] &&
+                                    ('x'==att.Value[4]||'X'==att.Value[4]) &&
+                                     '\0'==att.Value[5]) {
                                 sa3d = 2;
+                            }
+                        }
+                        // 'sv3d' to be deprecated. use 'proj'
+                        else if (crc_sv3d==attr_name) {
+                            if (crc_180==attr_value) {
+                                st3d = 0; // mono
+                                proj = 1; // equirectangular
+                                lon = 180;
+                                lat = 180;
+                            }
+                            else if (crc_180SBS==attr_value) {
+                                st3d = 2; // left-right
+                                proj = 1; // equirectangular
+                                lon = 180;
+                                lat = 180;
+                            }
+                            else if (crc_180TB==attr_value) {
+                                st3d = 1; // top-down
+                                proj = 1; // equirectangular
+                                lon = 180;
+                                lat = 180;
+                            }
+                            else if (crc_360==attr_value) {
+                                st3d = 0; // mono
+                                proj = 1; // equirectangular
+                                lon = 360;
+                                lat = 180;
+                            }
+                            else if (crc_360SBS==attr_value) {
+                                st3d = 2; // left-right
+                                proj = 1; // equirectangular
+                                lon = 360;
+                                lat = 180;
+                            }
+                            else if (crc_360TB==attr_value) {
+                                st3d = 1; // top-down
+                                proj = 1; // equirectangular
+                                lon = 360;
+                                lat = 180;
+                            }
+                            else if (crc_SBS==attr_value) {
+                                st3d = 2; // left-right
+                                proj = lon = lat = 0; // plane
+                            }
+                            else if (crc_TB==attr_value) {
+                                st3d = 1; // top-down
+                                proj = lon = lat = 0; // plane
                             }
                         }
                     }
 
                     if (crc_livestreams==loading_) {
-                        config_.AddLiveStream(name, url, sv3d, sa3d, timeout);
+                        config_.AddMedia(name, url, st3d, sa3d, proj, lon, lat, timeout, true);
                     }
                     else if (NULL!=url) {
                         // backslash to slash
@@ -3150,7 +3367,7 @@ public:
 
                         if (len<sizeof(buf_)) {
                             buf_[len] = '\0';
-                            config_.AddVideo(name, buf_, sv3d, sa3d);
+                            config_.AddMedia(name, buf_, st3d, sa3d, proj, lon, lat, 0, false);
                         }
                     }
                 }
@@ -3228,26 +3445,20 @@ public:
     }
 };
 
-VRVideoConfig::VRVideoConfig(wchar_t const* xml):
-stringPool_(),
-liveStreams_(128),
-videoPaths_(128),
-videos_(128),
-fails_(1)
-{
-    uint8* buf = NULL;
-    uint8* buf_end = NULL;
-    if (NULL!=xml) {
-        FILE* file = _wfopen(xml, L"rb");
+// read a xml file and transcode to utf8
+inline uint8* read_file_utf8(int& offset, int& len, wchar_t const* filename) {
+    uint8* buf = NULL; offset = len = 0;
+    if (NULL!=filename) {
+        FILE* file = _wfopen(filename, L"rb");
         if (NULL!=file) {
             fseek(file, 0, SEEK_END);
             size_t const file_size = ftell(file);
             rewind(file);
-            if (file_size>64) {
+            if (file_size>0) {
                 buf = (uint8*) malloc(file_size);
                 if (NULL!=buf) {
                     if (file_size==fread(buf, 1, file_size, file)) {
-                        buf_end = buf + file_size;
+                        len = (int) file_size;
                     }
                     else {
                         free(buf);
@@ -3259,36 +3470,36 @@ fails_(1)
         }
     }
 
-    if (NULL==buf || buf_end<=buf)
-        return;
+    if (NULL==buf)
+        return NULL;
 
+    // to utf8
     uint32 codepage = 0;
-    uint8* ptr = buf;
-    if (0xEF==ptr[0] && 0xBB==ptr[1] && 0xBF==ptr[2]) {
+    if (len>3 && 0xEF==buf[0] && 0xBB==buf[1] && 0xBF==buf[2]) {
         codepage = CP_UTF8;
-        ptr += 3;
+        offset = 3;
     }
-    else if (0xFF==ptr[0] && 0xFE==ptr[1]) {
-        if (0x00==ptr[2] && 0x00==ptr[3]) {
+    else if (len>2 && 0xFF==buf[0] && 0xFE==buf[1]) {
+        if (len>4 && 0x00==buf[2] && 0x00==buf[3]) {
             codepage = 12000; // UTF-32 little endian
-            ptr += 4;
+            offset = 4;
         }
         else {
             codepage = 1200; // UTF-16 little endian
-            ptr += 2;
+            offset = 2;
         }
     }
-    else if (0xFE==ptr[0] && 0xFF==ptr[1]) {
+    else if (len>2 && 0xFE==buf[0] && 0xFF==buf[1]) {
         codepage = 1201;// UTF-16 big endian
-        ptr += 2;
+        offset = 2;
     }
-    else if (0x00==ptr[0] && 0x00==ptr[1] && 0xFE==ptr[2] && 0xFF==ptr[3]) {
+    else if (len>4 && 0x00==buf[0] && 0x00==buf[1] && 0xFE==buf[2] && 0xFF==buf[3]) {
         codepage = 12001; // UTF-32 big-endian
-        ptr += 4;
+        offset = 4;
     }
     else { // non BOM
         uchardet_t chardet = uchardet_new();
-        if (0==uchardet_handle_data(chardet, (char const*) ptr, (int)(buf_end-ptr))) {
+        if (0==uchardet_handle_data(chardet, (char const*) buf, len)) {
             uchardet_data_end(chardet);
             codepage = FindCodePage(uchardet_get_charset(chardet));
         }
@@ -3299,9 +3510,10 @@ fails_(1)
         }
     }
 
-    int const data_length = (int) (buf_end-ptr);
+    int const data_length = len - offset;
     if (1200==codepage||1201==codepage) {
         int const valid_size = data_length & ~1;
+        uint8* ptr = buf + offset;
         if (1201==codepage) { // big endian
             uint8 const* dst_end = ptr + valid_size;
             for (uint8* dst=ptr; dst<dst_end; dst+=2) {
@@ -3311,15 +3523,14 @@ fails_(1)
             }
         }
 
-        int len = WideCharToMultiByte(CP_UTF8, 0, (wchar_t const*) ptr, valid_size/2, NULL, 0, NULL, NULL);
-        if (len>0) {
-            char* utf8 = (char*) malloc(len+1);
-            int len2 = WideCharToMultiByte(CP_UTF8, 0, (wchar_t const*) ptr, valid_size/2, utf8, len, NULL, NULL);
-            if (len==len2) {
-                utf8[len] = '\0';
+        int const len2 = WideCharToMultiByte(CP_UTF8, 0, (wchar_t const*) ptr, valid_size/2, NULL, 0, NULL, NULL);
+        if (len2>0) {
+            char* utf8 = (char*) malloc(len2+1);
+            if (len2==WideCharToMultiByte(CP_UTF8, 0, (wchar_t const*) ptr, valid_size/2, utf8, len2, NULL, NULL)) {
+                utf8[len2] = '\0';
                 free(buf);
-                ptr = buf = (uint8*) utf8;
-                buf_end = buf + len;
+                buf = (uint8*) utf8;
+                len = len2;
                 codepage = CP_UTF8;
             }
             else {
@@ -3332,21 +3543,20 @@ fails_(1)
         // will this work for utf-32 (12000==codepage||12001==codepage) ???
         // how can you make a utf-32 file anyway!?
         //
-        int len = MultiByteToWideChar(codepage, 0, (char const*) ptr, data_length, NULL, NULL);
-        if (len>0) {
-            wchar_t* wtext = (wchar_t*) malloc((len+1)*sizeof(wchar_t));
+        uint8* ptr = buf + offset;
+        int const len2 = MultiByteToWideChar(codepage, 0, (char const*) ptr, data_length, NULL, NULL);
+        if (len2>0) {
+            wchar_t* wtext = (wchar_t*) malloc((len2+1)*sizeof(wchar_t));
             if (wtext) {
-                int len2 = MultiByteToWideChar(codepage, 0, (char const*) ptr, data_length, wtext, len);
-                if (len==len2) {
-                    len = WideCharToMultiByte(CP_UTF8, 0, wtext, len2, NULL, 0, NULL, NULL);
-                    if (len>0) {
-                        char* utf8 = (char*) malloc(len+1);
-                        len2 = WideCharToMultiByte(CP_UTF8, 0, wtext, len2, utf8, len, NULL, NULL);
-                        if (len==len2) {
-                            utf8[len] = '\0';
+                if (len2==MultiByteToWideChar(codepage, 0, (char const*) ptr, data_length, wtext, len2)) {
+                    int const len3 = WideCharToMultiByte(CP_UTF8, 0, wtext, len2, NULL, 0, NULL, NULL);
+                    if (len3>0) {
+                        char* utf8 = (char*) malloc(len3+1);
+                        if (len3==WideCharToMultiByte(CP_UTF8, 0, wtext, len2, utf8, len3, NULL, NULL)) {
+                            utf8[len3] = '\0';
                             free(buf);
-                            ptr = buf = (uint8*) utf8;
-                            buf_end = buf + len;
+                            buf = (uint8*) utf8;
+                            len = len3;
                             codepage = CP_UTF8;
                         }
                         else {
@@ -3360,14 +3570,39 @@ fails_(1)
         }
     }
 
+    if (buf) {
+        if (CP_UTF8!=codepage) {
+            free(buf);
+            buf = NULL;
+            offset = len = 0;
+        }
+    }
+    else {
+        offset = len = 0;
+    }
+
+    return buf;
+}
+
+
+VRVideoConfig::VRVideoConfig(wchar_t const* xml):
+stringPool_(),
+liveStreams_(128),
+videoPaths_(128),
+videos_(128),
+fails_(1)
+{
+    int offset(0), length(0);
+    uint8* buf = read_file_utf8(offset, length, xml);
+
     // 2017.09.26 add app video path
     AddVideoPath("App Video", "$(APP_PATH)/video");
     AddVideoPath("App Video", "$(APP_PATH)/videos");
 
-    if (CP_UTF8==codepage) {
+    if (NULL!=buf) {
         char const* xml_header = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"; // length = 38
-        char const* xml_begin = (char const*) ptr;
-        char const* xml_end = (char const*) buf_end;
+        char const* xml_begin = (char const*) buf + offset;
+        char const* xml_end = (char const*) buf + length;
         if (0==memcmp(xml_begin, xml_header, 38)) {
             xml_begin += 38;
 
@@ -3382,9 +3617,180 @@ fails_(1)
                 fails_ = 0;
             }
         }
+        free(buf);
     }
-
-    free(buf);
 }
 
+// parse app config xml
+
+class AppConfigParser : public XMLParser
+{
+    wchar_t* const host_path_;
+    int const host_path_capacity_;
+    int    width_;
+    int    height_;
+    int    fullscreen_;
+    int    gpuDecoder_;
+    int    stacks_;
+    uint32 loading_;
+
+    bool BeginTag_(XML_Element const& ele, XML_Element const* ascent) {
+        uint32 const tag = mlabs::balai::CalcCRC(ele.Tag);
+        if (NULL!=ascent) {
+            if (1==stacks_) {
+                if (crc_windows==tag) {
+                    width_ = height_ = fullscreen_ = 0;
+                    int w(0), h(0);
+                    for (int i=0; i<ele.NumAttribs; ++i) {
+                        XML_Attrib const& att = ele.Attributes[i];
+                        if (0==memcmp(att.Name, "width", 6)) {
+                            w = atoi(att.Value);
+                        }
+                        else if (0==memcmp(att.Name, "height", 7)) {
+                            h = atoi(att.Value);
+                        }
+                        else if (0==memcmp(att.Name, "fullscreen", 11)) {
+                            if (0==memcmp(att.Value, "1", 2) ||
+                                0==memcmp(att.Value, "on", 3) ||
+                                0==memcmp(att.Value, "enable", 7)) {
+                                fullscreen_ = 1;
+                            }
+                        }
+                    }
+
+                    if (0==fullscreen_ && w>0 && h>0) {
+                        width_  = w;
+                        height_ = h;
+                    }
+                }
+                else if (crc_libraries==tag) {
+                    for (int i=0; i<ele.NumAttribs; ++i) {
+                        XML_Attrib const& att = ele.Attributes[i];
+                        if (0==memcmp(att.Name, "path", 5)) {
+                            if (NULL!=host_path_ && host_path_capacity_>0) {
+                                int len = MultiByteToWideChar(CP_UTF8, 0, att.Value, -1, host_path_, host_path_capacity_);
+                                if (len>0 && len<host_path_capacity_) {
+                                    host_path_[len] = L'\0'; // already is
+                                }
+                                else {
+                                    host_path_[0] = L'\0';
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else if (stacks_>1) {
+                if (crc_libraries==loading_) {
+                    if (crc_video==tag) {
+                        gpuDecoder_ = 0;
+                        for (int i=0; i<ele.NumAttribs; ++i) {
+                            XML_Attrib const& att = ele.Attributes[i];
+                            if (0==memcmp(att.Name, "decoder", 8)) {
+                                if (0==memcmp(att.Value, "gpu", 4) ||
+                                    0==memcmp(att.Value, "GPU", 4)) {
+                                    gpuDecoder_ = 1;
+                                }
+                                else if (0==memcmp(att.Value, "sw", 3) ||
+                                         0==memcmp(att.Value, "SW", 3)) {
+                                    gpuDecoder_ = -1;
+                                }
+                            }
+                            
+                        }
+                    }
+                }
+            }
+            else {
+                if (crc_vivecinema!=loading_) {
+                    return false;
+                }
+            }
+        }
+        else if (crc_vivecinema!=tag || 0!=stacks_) {
+            return false;
+        }
+
+        loading_ = tag;
+        ++stacks_;
+        return true;
+    }
+    bool EndTag_(XML_Element const& /*ele*/, XML_Element const* ascent) {
+        --stacks_;
+        if (NULL!=ascent) {
+            loading_ = mlabs::balai::CalcCRC(ascent->Tag);
+        }
+        else {
+            assert(0==stacks_);
+            return (crc_vivecinema==loading_);
+        }
+
+        return true;
+    }
+
+    BL_NO_COPY_ALLOW(AppConfigParser);
+
+public:
+    AppConfigParser(wchar_t* path, int max_len):
+        host_path_(path),host_path_capacity_(max_len),width_(0),height_(0),fullscreen_(0),gpuDecoder_(0),
+        stacks_(0),loading_(0) {
+    }
+
+    bool IsFullscreen() const { return 0!=fullscreen_; }
+    int PreferGPUDecoder() const { return gpuDecoder_; }
+    int Width() const { return width_; }
+    int Height() const { return height_; }
+
+    bool Read(wchar_t const* xml) {
+        int offset(0), length(0);
+        uint8* buf = read_file_utf8(offset, length, xml);
+        if (NULL!=buf) {
+            char const* xml_header = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"; // length = 38
+            char const* xml_begin = (char const*) buf + offset;
+            char const* xml_end = (char const*) buf + length;
+            if (0==memcmp(xml_begin, xml_header, 38)) {
+                xml_begin += 38;
+
+                while ('<'!=*xml_begin && xml_begin<xml_end)
+                    ++xml_begin;
+
+                while ('>'!=xml_end[-1] && xml_begin<xml_end)
+                    --xml_end;
+
+                if (Parse(xml_begin, xml_end)) {
+                    free(buf);
+                    return true;
+                }
+            }
+
+            free(buf);
+        }
+
+        return false;
+    }
+};
+
+} // namespace htc
+
+// [ugly]
+bool ReadAppConfig(wchar_t const* xml, 
+                   wchar_t* host_path, int max_path_len,
+                   int& winwidth, int& winheight, bool& fullscreen,
+                   int& preferDecoder)
+{
+    htc::AppConfigParser config(host_path, max_path_len);
+    if (config.Read(xml)) {
+        fullscreen = config.IsFullscreen();
+        preferDecoder = config.PreferGPUDecoder();
+        if (fullscreen) {
+            winwidth = winheight = 0;
+        }
+        else if (config.Width()>0 && config.Height()>0) {
+            winwidth = config.Width();
+            winheight = config.Height();
+        }
+
+        return true;
+    }
+    return false;
 }

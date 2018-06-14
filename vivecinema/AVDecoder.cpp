@@ -2268,22 +2268,14 @@ int AVDecoder::StreamingAudio(uint8* dst, int maxSize, int frames, float& gain, 
             else if (0==audioBufferFlushing_) {
                 timeAudioCrossfade_ = curr_time + AUDIO_FADE_IN_TIME;
 
-                int const at_time = (int) ((audioPutPTS_-startTime_)/1000);
+                int const at_time = (audioPutPTS_>startTime_) ? (int) ((audioPutPTS_-startTime_)/1000):0;
                 int lag_time = 0;
                 if (0==timeInterruptSysTime_) {
                     timeInterruptSysTime_ = curr_time;
-                    lag_time = (int) av_rescale(max_frames-frames, AV_TIME_BASE, audioInfo_.SampleRate);
-#ifdef BL_AVDECODER_VERBOSE
-                    int ms = at_time; if (ms<0) ms = 0;
-                    int ss = ms/1000; ms %= 1000;
-                    int mm = ss/60; ss %= 60;
-                    int hh = mm/60; mm %= 60;
-                    BL_LOG("** audio interrupt at %d:%02d:%02d:%03d!!! (get:%lli put:%lli frames:%d)\n",
-                           hh, mm, ss, ms, (audioGetPTS_-startTime_)/1000, (audioPutPTS_-startTime_)/1000, max_frames);
-#endif
+                    lag_time = (int) av_rescale(max_frames-frames, 1000, audioInfo_.SampleRate);
                 }
                 else {
-                    lag_time = (int) ((curr_time-timeInterruptSysTime_)/100);
+                    lag_time = (int) ((curr_time-timeInterruptSysTime_)/1000);
                 }
 
                 if (NULL!=host_) {
@@ -3298,7 +3290,6 @@ bool AVDecoder::AudioSubtitleThread_()
                 audioPutPTS_ = pts2;
 
                 // audio late frame
-
                 if (0<timeStartSysTime_ && NULL!=host_) {
                     int64_t const cur_time = av_gettime();
                     if ((timeStartSysTime_+pts1)<cur_time) {

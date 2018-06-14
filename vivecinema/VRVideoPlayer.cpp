@@ -102,6 +102,7 @@ float PickTest(float& hit_x, float& hit_z,
     return -1.0f;
 }
 
+
 //---------------------------------------------------------------------------------------
 VideoTrack::VideoTrack():
 sa3d_(),
@@ -116,9 +117,8 @@ thumbnail_texture_id_(-1),
 font_texture_id_(-1), // invalid
 width_(0),
 height_(0),
-spherical_longitude_(0),
-spherical_latitude_south_(0),
-spherical_latitude_north_(0),
+equirect_longitude_(0),equirect_latitude_south_(0),equirect_latitude_north_(0),
+cubemap_layout_(0),cubemap_padding_(0),
 thumbnail_cache_(0),
 timeout_(250),
 duration_(0),
@@ -146,6 +146,54 @@ VideoTrack::~VideoTrack()
     subtitle_stream_id_ = audio_stream_id_ = 0xff;
 }
 
+//---------------------------------------------------------------------------------------
+bool VRVideoPlayer::Tetrahedron::Create()
+{
+    if (0!=vao_) {
+        assert(0!=vbo_);
+        return true;
+    }
+    else {
+        assert(0==vbo_);
+        glGenVertexArrays(1, &vao_);
+        if (0==vao_) {
+            return false;
+        }
+
+        glGenBuffers(1, &vbo_);
+        if (0==vbo_) {
+            glDeleteVertexArrays(1, &vao_); vao_ = 0;
+            return false;
+        }
+    }
+
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    // vertex buffer
+    Vector3 const v1( sqrt(8.0f/9.0f),             0.0f, -1.0f/3.0f);
+    Vector3 const v2(-sqrt(2.0f/9.0f),  sqrt(2.0f/3.0f), -1.0f/3.0f);
+    Vector3 const v3(-sqrt(2.0f/9.0f), -sqrt(2.0f/3.0f), -1.0f/3.0f);
+    Vector3 const v4(            0.0f,             0.0f,       1.0f);
+    Vector3 vertices[12] = {
+        v1, v2, v3, // base triangle
+        v4, v1, v3,
+        v4, v3, v2,
+        v4, v2, v1,
+    };
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12, (GLvoid const*)0);
+
+    // unbind all
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    return true;
+}
 //---------------------------------------------------------------------------------------
 bool VRVideoPlayer::SphereGeometry::Create(int longitude, int latitude_south, int latitude_north)
 {
@@ -437,6 +485,532 @@ bool VRVideoPlayer::SphereGeometry::Create(int longitude, int latitude_south, in
     }
     return false;
 }
+//---------------------------------------------------------------------------------------
+bool VRVideoPlayer::CubeGeometry::Create()
+{
+    if (0!=vao_) {
+        return true;
+    }
+    else {
+        glGenVertexArrays(1, &vao_);
+        if (0==vao_) {
+            return false;
+        }
+    }
+
+    if (0==vbo_) {
+        glGenBuffers(1, &vbo_);
+        if (0==vbo_) {
+            glDeleteVertexArrays(1, &vao_);
+            vao_ = 0;
+            return false;
+        }
+    }
+
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    // vertex buffer
+    struct vertex {
+        float x, y, z;
+        float u, v, cu, cv;
+    } cube[24] = {
+        // right(+X) face
+        {  0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+
+        // front(+Y) face
+        { -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+
+        // up(+Z) face
+        { -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+
+        // left(-X) face
+        { -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+
+        // back(-Y) face
+        {  0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+
+        // down(-Z) face
+        { -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+    };
+
+    //
+    // layouts:
+    //   https://github.com/google/spatial-media/blob/master/docs/spherical-video-v2-rfc.md#cubemap-projection-box-cbmp
+    //   https://github.com/facebook/transform360
+    //
+    //  1. Facebook Transform360 Cubemap_32 / Spherical video v2 RFC. layout=0
+    //      ---------------------------------------
+    //      | right face | left face  | up face   |
+    //      ---------------------------------------
+    //      | down face  | front face | back face |
+    //      ---------------------------------------
+    //  2. Facebook Transform360 Cubemap_23_offcenter
+    //  3. YouTube EAC
+    int const total_layouts = 3;
+    int const total_vb_size = total_layouts*2*sizeof(cube); // 2 cubes for each layout
+    uint8* vb = (uint8*) malloc(total_vb_size);
+    uint8* ptr = vb;
+
+    //
+    // CUBEMAP_32 | Google Spherical Video V2 RFC(layout:0) mono - offset = 0
+    {
+        // u & v
+        float const du = 0.5f/3.0f;
+        float const dv = 0.5f/2.0f;
+
+        // cu & cv
+        float const c1 = 1.0f/6.0f;
+        float const c2 = 0.5f;
+        float const c3 = 5.0f/6.0f;
+        float const r1 = 0.25f;
+        float const r2 = 0.75f;
+
+        // +X : right face
+        cube[0].u = -du; cube[0].v = -dv;
+        cube[1].u = -du; cube[1].v =  dv;
+        cube[2].u =  du; cube[2].v =  dv;
+        cube[3].u =  du; cube[3].v = -dv;
+        cube[0].cu = cube[1].cu = cube[2].cu = cube[3].cu = c1; 
+        cube[0].cv = cube[1].cv = cube[2].cv = cube[3].cv = r1;
+
+        // +Y : front face
+        cube[4].u = -du; cube[4].v = -dv;
+        cube[5].u = -du; cube[5].v =  dv;
+        cube[6].u =  du; cube[6].v =  dv;
+        cube[7].u =  du; cube[7].v = -dv;
+        cube[4].cu = cube[5].cu = cube[6].cu = cube[7].cu = c2; 
+        cube[4].cv = cube[5].cv = cube[6].cv = cube[7].cv = r2;
+
+        // +Z : up face
+        cube[8].u  = -du; cube[8].v  = -dv;
+        cube[9].u  = -du; cube[9].v  =  dv;
+        cube[10].u =  du; cube[10].v =  dv;
+        cube[11].u =  du; cube[11].v = -dv;
+        cube[8].cu = cube[9].cu = cube[10].cu = cube[11].cu = c3; 
+        cube[8].cv = cube[9].cv = cube[10].cv = cube[11].cv = r1;
+
+        // -X : left face
+        cube[12].u = -du; cube[12].v = -dv;
+        cube[13].u = -du; cube[13].v =  dv;
+        cube[14].u =  du; cube[14].v =  dv;
+        cube[15].u =  du; cube[15].v = -dv;
+        cube[12].cu = cube[13].cu = cube[14].cu = cube[15].cu = c2; 
+        cube[12].cv = cube[13].cv = cube[14].cv = cube[15].cv = r1;
+
+        // -Y : back face
+        cube[16].u = -du; cube[16].v = -dv;
+        cube[17].u = -du; cube[17].v =  dv;
+        cube[18].u =  du; cube[18].v =  dv;
+        cube[19].u =  du; cube[19].v = -dv;
+        cube[16].cu = cube[17].cu = cube[18].cu = cube[19].cu = c3; 
+        cube[16].cv = cube[17].cv = cube[18].cv = cube[19].cv = r2;
+
+        // -Z : down face
+        cube[20].u = -du; cube[20].v = -dv;
+        cube[21].u = -du; cube[21].v =  dv;
+        cube[22].u =  du; cube[22].v =  dv;
+        cube[23].u =  du; cube[23].v = -dv;
+        cube[20].cu = cube[21].cu = cube[22].cu = cube[23].cu = c1; 
+        cube[20].cv = cube[21].cv = cube[22].cv = cube[23].cv = r2;
+
+        memcpy(ptr, cube, sizeof(cube)); ptr += sizeof(cube);
+    }
+
+    //
+    // CUBEMAP_32 | Google Spherical Video V2 RFC(layout:0) stereo - offset = 24
+    {
+        //
+        // TO-DO : Need to check...
+        //
+
+        // u & v
+        float const du = 0.5f/4.0f;
+        float const dv = 0.5f/3.0f;
+
+        // cu & cv
+        float const c1 = 1.0f/8.0f;
+        float const c2 = 3.0f/8.0f;
+        float const r1 = 1.0f/6.0f;
+        float const r2 = 0.5f;
+        float const r3 = 5.0f/6.0f;
+
+        // +X : right face
+        cube[0].u = -du; cube[0].v =  dv;
+        cube[1].u =  du; cube[1].v =  dv;
+        cube[2].u =  du; cube[2].v = -dv;
+        cube[3].u = -du; cube[3].v = -dv;
+        cube[0].cu = cube[1].cu = cube[2].cu = cube[3].cu = c1; 
+        cube[0].cv = cube[1].cv = cube[2].cv = cube[3].cv = r3;
+
+        // +Y : front face
+        cube[4].u = -du; cube[4].v =  dv;
+        cube[5].u =  du; cube[5].v =  dv;
+        cube[6].u =  du; cube[6].v = -dv;
+        cube[7].u = -du; cube[7].v = -dv;
+        cube[4].cu = cube[5].cu = cube[6].cu = cube[7].cu = c2; 
+        cube[4].cv = cube[5].cv = cube[6].cv = cube[7].cv = r2;
+
+        // +Z : up face
+        cube[8].u  = -du; cube[8].v  =  dv;
+        cube[9].u  =  du; cube[9].v  =  dv;
+        cube[10].u =  du; cube[10].v = -dv;
+        cube[11].u = -du; cube[11].v = -dv;
+        cube[8].cu = cube[9].cu = cube[10].cu = cube[11].cu = c1; 
+        cube[8].cv = cube[9].cv = cube[10].cv = cube[11].cv = r1;
+
+        // -X : left face
+        cube[12].u = -du; cube[12].v =  dv;
+        cube[13].u =  du; cube[13].v =  dv;
+        cube[14].u =  du; cube[14].v = -dv;
+        cube[15].u = -du; cube[15].v = -dv;
+        cube[12].cu = cube[13].cu = cube[14].cu = cube[15].cu = c1; 
+        cube[12].cv = cube[13].cv = cube[14].cv = cube[15].cv = r2;
+
+        // -Y : back face
+        cube[16].u = -du; cube[16].v =  dv;
+        cube[17].u =  du; cube[17].v =  dv;
+        cube[18].u =  du; cube[18].v = -dv;
+        cube[19].u = -du; cube[19].v = -dv;
+        cube[16].cu = cube[17].cu = cube[18].cu = cube[19].cu = c2; 
+        cube[16].cv = cube[17].cv = cube[18].cv = cube[19].cv = r1;
+
+        // -Z : down face
+        cube[20].u = -du; cube[20].v =  dv;
+        cube[21].u =  du; cube[21].v =  dv;
+        cube[22].u =  du; cube[22].v = -dv;
+        cube[23].u = -du; cube[23].v = -dv;
+        cube[20].cu = cube[21].cu = cube[22].cu = cube[23].cu = c2; 
+        cube[20].cv = cube[21].cv = cube[22].cv = cube[23].cv = r3;
+
+        memcpy(ptr, cube, sizeof(cube)); ptr += sizeof(cube);
+    }
+
+    //
+    // CUBEMAP_23_OFFCENTER mono - offset = 48
+    {
+        // u & v
+        float const du = 0.5f/2.0f;
+        float const dv = 0.5f/3.0f;
+
+        // cu & cv
+        float const c1 = 0.25f;
+        float const c2 = 0.75f;
+        float const r1 = 0.5f/3.0f;
+        float const r2 = 0.5f;
+        float const r3 = 2.5f/3.0f;
+
+        // +X : right face
+        cube[0].u =  du; cube[0].v = -dv;
+        cube[1].u = -du; cube[1].v = -dv;
+        cube[2].u = -du; cube[2].v =  dv;
+        cube[3].u =  du; cube[3].v =  dv;
+        cube[0].cu = cube[1].cu = cube[2].cu = cube[3].cu = c1; 
+        cube[0].cv = cube[1].cv = cube[2].cv = cube[3].cv = r3;
+
+        // +Y : front face
+        cube[4].u =  du; cube[4].v = -dv;
+        cube[5].u = -du; cube[5].v = -dv;
+        cube[6].u = -du; cube[6].v =  dv;
+        cube[7].u =  du; cube[7].v =  dv;
+        cube[4].cu = cube[5].cu = cube[6].cu = cube[7].cu = c1; 
+        cube[4].cv = cube[5].cv = cube[6].cv = cube[7].cv = r2;
+
+        // +Z : up face
+        cube[8].u  =  du; cube[8].v  =  dv;
+        cube[9].u  =  du; cube[9].v  = -dv;
+        cube[10].u = -du; cube[10].v = -dv;
+        cube[11].u = -du; cube[11].v =  dv;
+        cube[8].cu = cube[9].cu = cube[10].cu = cube[11].cu = c2; 
+        cube[8].cv = cube[9].cv = cube[10].cv = cube[11].cv = r1;
+
+        // -X : left face
+        cube[12].u =  du; cube[12].v = -dv;
+        cube[13].u = -du; cube[13].v = -dv;
+        cube[14].u = -du; cube[14].v =  dv;
+        cube[15].u =  du; cube[15].v =  dv;
+        cube[12].cu = cube[13].cu = cube[14].cu = cube[15].cu = c1; 
+        cube[12].cv = cube[13].cv = cube[14].cv = cube[15].cv = r1;
+
+        // -Y : back face
+        cube[16].u = -du; cube[16].v = -dv;
+        cube[17].u = -du; cube[17].v =  dv;
+        cube[18].u =  du; cube[18].v =  dv;
+        cube[19].u =  du; cube[19].v = -dv;
+        cube[16].cu = cube[17].cu = cube[18].cu = cube[19].cu = c2; 
+        cube[16].cv = cube[17].cv = cube[18].cv = cube[19].cv = r2;
+
+        // -Z : down face
+        cube[20].u =  du; cube[20].v =  dv;
+        cube[21].u =  du; cube[21].v = -dv;
+        cube[22].u = -du; cube[22].v = -dv;
+        cube[23].u = -du; cube[23].v =  dv;
+        cube[20].cu = cube[21].cu = cube[22].cu = cube[23].cu = c2; 
+        cube[20].cv = cube[21].cv = cube[22].cv = cube[23].cv = r3;
+
+        memcpy(ptr, cube, sizeof(cube)); ptr += sizeof(cube);
+    }
+
+    //
+    // CUBEMAP_23_OFFCENTER stereo - offset = 72
+    {
+        // u & v
+        float const du = 0.5f/4.0f;
+        float const dv = 0.5f/3.0f;
+
+        // cu & cv
+        float const c1 = 0.125f;
+        float const c2 = 0.375f;
+        float const r1 = 0.5f/3.0f;
+        float const r2 = 0.5f;
+        float const r3 = 2.5f/3.0f;
+
+        // +X : right face
+        cube[0].u =  du; cube[0].v = -dv;
+        cube[1].u = -du; cube[1].v = -dv;
+        cube[2].u = -du; cube[2].v =  dv;
+        cube[3].u =  du; cube[3].v =  dv;
+        cube[0].cu = cube[1].cu = cube[2].cu = cube[3].cu = c1; 
+        cube[0].cv = cube[1].cv = cube[2].cv = cube[3].cv = r3;
+
+        // +Y : front face
+        cube[4].u =  du; cube[4].v = -dv;
+        cube[5].u = -du; cube[5].v = -dv;
+        cube[6].u = -du; cube[6].v =  dv;
+        cube[7].u =  du; cube[7].v =  dv;
+        cube[4].cu = cube[5].cu = cube[6].cu = cube[7].cu = c1; 
+        cube[4].cv = cube[5].cv = cube[6].cv = cube[7].cv = r2;
+
+        // +Z : up face
+        cube[8].u  =  du; cube[8].v  =  dv;
+        cube[9].u  =  du; cube[9].v  = -dv;
+        cube[10].u = -du; cube[10].v = -dv;
+        cube[11].u = -du; cube[11].v =  dv;
+        cube[8].cu = cube[9].cu = cube[10].cu = cube[11].cu = c2; 
+        cube[8].cv = cube[9].cv = cube[10].cv = cube[11].cv = r1;
+
+        // -X : left face
+        cube[12].u =  du; cube[12].v = -dv;
+        cube[13].u = -du; cube[13].v = -dv;
+        cube[14].u = -du; cube[14].v =  dv;
+        cube[15].u =  du; cube[15].v =  dv;
+        cube[12].cu = cube[13].cu = cube[14].cu = cube[15].cu = c1; 
+        cube[12].cv = cube[13].cv = cube[14].cv = cube[15].cv = r1;
+
+        // -Y : back face
+        cube[16].u = -du; cube[16].v = -dv;
+        cube[17].u = -du; cube[17].v =  dv;
+        cube[18].u =  du; cube[18].v =  dv;
+        cube[19].u =  du; cube[19].v = -dv;
+        cube[16].cu = cube[17].cu = cube[18].cu = cube[19].cu = c2; 
+        cube[16].cv = cube[17].cv = cube[18].cv = cube[19].cv = r2;
+
+        // -Z : down face
+        cube[20].u =  du; cube[20].v =  dv;
+        cube[21].u =  du; cube[21].v = -dv;
+        cube[22].u = -du; cube[22].v = -dv;
+        cube[23].u = -du; cube[23].v =  dv;
+        cube[20].cu = cube[21].cu = cube[22].cu = cube[23].cu = c2; 
+        cube[20].cv = cube[21].cv = cube[22].cv = cube[23].cv = r3;
+
+        memcpy(ptr, cube, sizeof(cube)); ptr += sizeof(cube);
+    }
+
+    //
+    // YouTube EAC mono - offset = 96
+    {
+        // u & v
+        float const du = 0.5f/3.0f;
+        float const dv = 0.5f/2.0f;
+
+        // cu & cv
+        float const c1 = 1.0f/6.0f;
+        float const c2 = 0.5f;
+        float const c3 = 5.0f/6.0f;
+        float const r1 = 0.25f;
+        float const r2 = 0.75f;
+
+        // +X : right face
+        cube[0].u = -du; cube[0].v = -dv;
+        cube[1].u = -du; cube[1].v =  dv;
+        cube[2].u =  du; cube[2].v =  dv;
+        cube[3].u =  du; cube[3].v = -dv;
+        cube[0].cu = cube[1].cu = cube[2].cu = cube[3].cu = c3; 
+        cube[0].cv = cube[1].cv = cube[2].cv = cube[3].cv = r1;
+
+        // +Y : front face
+        cube[4].u = -du; cube[4].v = -dv;
+        cube[5].u = -du; cube[5].v =  dv;
+        cube[6].u =  du; cube[6].v =  dv;
+        cube[7].u =  du; cube[7].v = -dv;
+        cube[4].cu = cube[5].cu = cube[6].cu = cube[7].cu = c2; 
+        cube[4].cv = cube[5].cv = cube[6].cv = cube[7].cv = r1;
+
+        // +Z : up face
+        cube[8].u  = -du; cube[8].v  =  dv;
+        cube[9].u  =  du; cube[9].v  =  dv;
+        cube[10].u =  du; cube[10].v = -dv;
+        cube[11].u = -du; cube[11].v = -dv;
+        cube[8].cu = cube[9].cu = cube[10].cu = cube[11].cu = c3; 
+        cube[8].cv = cube[9].cv = cube[10].cv = cube[11].cv = r2;
+
+        // -X : left face
+        cube[12].u = -du; cube[12].v = -dv;
+        cube[13].u = -du; cube[13].v =  dv;
+        cube[14].u =  du; cube[14].v =  dv;
+        cube[15].u =  du; cube[15].v = -dv;
+        cube[12].cu = cube[13].cu = cube[14].cu = cube[15].cu = c1; 
+        cube[12].cv = cube[13].cv = cube[14].cv = cube[15].cv = r1;
+
+        // -Y : back face
+        cube[16].u =  du; cube[16].v = -dv;
+        cube[17].u = -du; cube[17].v = -dv;
+        cube[18].u = -du; cube[18].v =  dv;
+        cube[19].u =  du; cube[19].v =  dv;
+        cube[16].cu = cube[17].cu = cube[18].cu = cube[19].cu = c2; 
+        cube[16].cv = cube[17].cv = cube[18].cv = cube[19].cv = r2;
+
+        // -Z : down face
+        cube[20].u = -du; cube[20].v =  dv;
+        cube[21].u =  du; cube[21].v =  dv;
+        cube[22].u =  du; cube[22].v = -dv;
+        cube[23].u = -du; cube[23].v = -dv;
+        cube[20].cu = cube[21].cu = cube[22].cu = cube[23].cu = c1; 
+        cube[20].cv = cube[21].cv = cube[22].cv = cube[23].cv = r2;
+
+        memcpy(ptr, cube, sizeof(cube)); ptr += sizeof(cube);
+    }
+
+    //
+    // YouTube EAC stereo - offset = 120
+    {
+        // u & v
+        float const du = 0.5f/4.0f;
+        float const dv = 0.5f/3.0f;
+
+        // cu & cv
+        float const c1 = 1.0f/8.0f;
+        float const c2 = 3.0f/8.0f;
+        float const r1 = 1.0f/6.0f;
+        float const r2 = 0.5f;
+        float const r3 = 5.0f/6.0f;
+
+        // +X : right face
+        cube[0].u = -du; cube[0].v =  dv;
+        cube[1].u =  du; cube[1].v =  dv;
+        cube[2].u =  du; cube[2].v = -dv;
+        cube[3].u = -du; cube[3].v = -dv;
+        cube[0].cu = cube[1].cu = cube[2].cu = cube[3].cu = c1; 
+        cube[0].cv = cube[1].cv = cube[2].cv = cube[3].cv = r1;
+
+        // +Y : front face
+        cube[4].u = -du; cube[4].v =  dv;
+        cube[5].u =  du; cube[5].v =  dv;
+        cube[6].u =  du; cube[6].v = -dv;
+        cube[7].u = -du; cube[7].v = -dv;
+        cube[4].cu = cube[5].cu = cube[6].cu = cube[7].cu = c1;
+        cube[4].cv = cube[5].cv = cube[6].cv = cube[7].cv = r2;
+
+        // +Z : up face
+        cube[8].u  =  du; cube[8].v  =  dv;
+        cube[9].u  =  du; cube[9].v  = -dv;
+        cube[10].u = -du; cube[10].v = -dv;
+        cube[11].u = -du; cube[11].v =  dv;
+        cube[8].cu = cube[9].cu = cube[10].cu = cube[11].cu = c2; 
+        cube[8].cv = cube[9].cv = cube[10].cv = cube[11].cv = r1;
+
+        // -X : left face
+        cube[12].u = -du; cube[12].v =  dv;
+        cube[13].u =  du; cube[13].v =  dv;
+        cube[14].u =  du; cube[14].v = -dv;
+        cube[15].u = -du; cube[15].v = -dv;
+        cube[12].cu = cube[13].cu = cube[14].cu = cube[15].cu = c1;
+        cube[12].cv = cube[13].cv = cube[14].cv = cube[15].cv = r3;
+
+        // -Y : back face
+        cube[16].u = -du; cube[16].v = -dv;
+        cube[17].u = -du; cube[17].v =  dv;
+        cube[18].u =  du; cube[18].v =  dv;
+        cube[19].u =  du; cube[19].v = -dv;
+        cube[16].cu = cube[17].cu = cube[18].cu = cube[19].cu = c2;
+        cube[16].cv = cube[17].cv = cube[18].cv = cube[19].cv = r2;
+
+        // -Z : down face
+        cube[20].u =  du; cube[20].v =  dv;
+        cube[21].u =  du; cube[21].v = -dv;
+        cube[22].u = -du; cube[22].v = -dv;
+        cube[23].u = -du; cube[23].v =  dv;
+        cube[20].cu = cube[21].cu = cube[22].cu = cube[23].cu = c2;
+        cube[20].cv = cube[21].cv = cube[22].cv = cube[23].cv = r3;
+
+        memcpy(ptr, cube, sizeof(cube)); ptr += sizeof(cube);
+    }
+
+    //
+    // more styles to come...
+    //
+
+    glBufferData(GL_ARRAY_BUFFER, total_vb_size, vb, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (GLvoid const*)0);
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(vertex), (GLvoid const*)12);
+
+    // unbind all
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    free(vb);
+
+    return true;
+}
+//---------------------------------------------------------------------------------------
+bool VRVideoPlayer::CubeGeometry::Draw(VIDEO_TYPE type, uint32 layout) const
+{
+    VIDEO_TYPE const cubic = (VIDEO_TYPE) (VIDEO_TYPE_CUBE&type);
+    if ((VIDEO_TYPE_EAC==cubic || VIDEO_TYPE_CUBEMAP==cubic) && vao_) {
+        int offset = 0;
+        if (256==layout) { // CUBEMAP_23_OFFCENTER
+            offset += 48;
+        }
+        else if (257==layout) { // YouTube
+            offset += 96;
+        }
+        else {
+            assert(0==layout);
+        }
+
+        if (VIDEO_3D_MONO!=(VIDEO_TYPE_3D_MASK&type)) {
+            offset += 24;
+        }
+
+        glBindVertexArray(vao_);
+        glDrawArrays(GL_QUADS, offset, 24);
+        return true;
+    }
+    return false;
+}
 
 //---------------------------------------------------------------------------------------
 VRVideoPlayer::VRVideoPlayer():
@@ -458,6 +1032,8 @@ fontFx_(NULL),
 subtitleFx_(NULL),subtitleFxCoeff_(NULL),subtitleFxShadowColor_(NULL),
 pan360_(NULL),pan360Crop_(NULL),pan360Diffuse_(NULL),pan360Map_(NULL),
 pan360NV12_(NULL),pan360NV12Crop_(NULL),pan360MapY_(NULL),pan360MapUV_(NULL),
+cubeNV12_(NULL),cubeNV12Crop_(NULL),cubeMapY_(NULL),cubeMapUV_(NULL),
+eacNV12_(NULL),eacNV12Crop_(NULL),eacMapY_(NULL),eacMapUV_(NULL),
 videoNV12_(NULL),videoMapY_(NULL),videoMapUV_(NULL),
 subtitle_(NULL),
 uiGlyph_(NULL),
@@ -466,7 +1042,7 @@ vrMgr_(mlabs::balai::VR::Manager::GetInstance()),
 focus_controller_(NULL),
 thumbnailBuffer_(NULL),audioBuffer_(NULL),
 thumbnailBufferSize_(0),audioBufferSize_(0),
-fullsphere_(),customized_(),
+enclosure_(),dome_(),cube_(),
 hmd_xform_(Matrix3::Identity),
 viewer_xform_(Matrix3::Identity),
 dashboard_xform_(Matrix3::Identity),
@@ -1019,6 +1595,88 @@ bool VRVideoPlayer::Initialize()
     pan360MapY_ = pan360NV12_->FindSampler("mapY");
     pan360MapUV_ = pan360NV12_->FindSampler("mapUV");
 
+    // cubemap
+    char const* cubemap_vp = "#version 410 core\n"
+        "uniform mat4 matViewProj;\n"
+        "uniform vec4 texcrop;\n"
+        "layout(location=0) in vec4 pos;\n"
+        "layout(location=1) in vec4 tc;\n"
+        "out vec2 t2;\n"
+        "void main() {\n"
+        "  gl_Position = pos*matViewProj;\n"
+        "  t2 = texcrop.xy*tc.xy + tc.zw + texcrop.zw;\n"
+        "}";
+    char const* cubemap_fp = "#version 410 core\n"
+        "uniform sampler2D mapY;\n"
+        "uniform sampler2D mapUV;\n"
+        "in vec2 t2;\n"
+        "layout(location=0) out vec4 c0;\n"
+        "void main() {"
+        "  vec3 nv12;"
+        "  nv12.x = clamp(1.16438*texture(mapY, t2).r - 0.07306, 0.0, 1.0);"
+        "  nv12.yz = clamp((texture(mapUV, t2).rg - vec2(0.5, 0.5))*vec2(1.00689, 1.40091), vec2(-0.436, -0.615), vec2(0.436, 0.615));"
+        "  c0.xyz = mat3(1.00000,  1.00000, 1.00000,"
+        "                0.00000, -0.21482, 2.12798,"
+        "                1.28033, -0.38059, 0.00000)*nv12;"
+        "  c0.w = 1.0;"
+        "}";
+
+    program = CreateGLProgram(cubemap_vp, cubemap_fp);
+    glShader = new GLProgram(0);
+    if (glShader->Init(program)) {
+        cubeNV12_ = glShader;
+    }
+    else {
+        return false;
+    }
+    cubeNV12Crop_ = cubeNV12_->FindConstant("texcrop");
+    cubeMapY_ = cubeNV12_->FindSampler("mapY");
+    cubeMapUV_ = cubeNV12_->FindSampler("mapUV");
+
+    // EAC - Equi-Angular Cubemap
+    char const* eac_vp = "#version 410 core\n"
+        "uniform mat4 matViewProj;\n"
+        "uniform vec4 texcrop;\n"
+        "layout(location=0) in vec4 pos;\n"
+        "layout(location=1) in vec4 tc;\n"
+        "out vec4 t4;\n"
+        "out vec2 t0;\n"
+        "void main() {\n"
+        "  gl_Position = pos*matViewProj;\n"
+        "  t0 = tc.zw + texcrop.zw;\n"
+        "  vec2 t1 = texcrop.xy*tc.xy;\n"
+        "  t4.xy = t1;\n"
+        "  t4.zw = abs(t1);\n"
+        "}";
+    char const* eac_fp = "#version 410 core\n"
+        "uniform sampler2D mapY;\n"
+        "uniform sampler2D mapUV;\n"
+        "in vec4 t4;\n"
+        "in vec2 t0;\n"
+        "layout(location=0) out vec4 c0;\n"
+        "void main() {\n"
+        "  vec3 nv12;\n"
+        "  vec2 t2 = 1.2732396*atan(t4.xy, t4.zw)*t4.zw + t0;\n"
+        "  nv12.x = clamp(1.16438*texture(mapY, t2).r - 0.07306, 0.0, 1.0);\n"
+        "  nv12.yz = clamp((texture(mapUV, t2).rg - vec2(0.5, 0.5))*vec2(1.00689, 1.40091), vec2(-0.436, -0.615), vec2(0.436, 0.615));\n"
+        "  c0.xyz = mat3(1.00000,  1.00000, 1.00000,\n"
+        "                0.00000, -0.21482, 2.12798,\n"
+        "                1.28033, -0.38059, 0.00000)*nv12;\n"
+        "  c0.w = 1.0;\n"
+        "}";
+
+    program = CreateGLProgram(eac_vp, eac_fp);
+    glShader = new GLProgram(0);
+    if (glShader->Init(program)) {
+        eacNV12_ = glShader;
+    }
+    else {
+        return false;
+    }
+    eacNV12Crop_ = eacNV12_->FindConstant("texcrop");
+    eacMapY_ = eacNV12_->FindSampler("mapY");
+    eacMapUV_ = eacNV12_->FindSampler("mapUV");
+
     // common vertex shader (for Primiive)
     char const* vsh_v_c_tc1 = "#version 410 core\n"
         "layout(location=0) in vec4 position;\n"
@@ -1224,8 +1882,9 @@ bool VRVideoPlayer::Initialize()
     subtitleFxShadowColor_ = subtitleFx_->FindConstant("shadow");
 
     // geometry
-    fullsphere_.Create(360);
-    customized_.Create(180);
+    enclosure_.Create();
+    dome_.Create(180);
+    cube_.Create();
 
     extSubtitleInfo_ = Texture2D::New(0, true);
     extSubtitleInfo_->SetAddressMode(ADDRESS_CLAMP, ADDRESS_CLAMP);
@@ -1516,18 +2175,20 @@ void VRVideoPlayer::Finalize()
 
     // relase video texture
     videoTexture_.Finalize();
-    
+
     // hw context
     mlabs::balai::video::hwaccel::DeinitContext();
 
     subtitleFxCoeff_ = subtitleFxShadowColor_ = NULL;
-    pan360Crop_ = pan360Diffuse_ = pan360NV12Crop_ = NULL;
+    pan360Crop_ = pan360Diffuse_ = pan360NV12Crop_ = cubeNV12Crop_ = eacNV12Crop_ = NULL;
     pan360Map_ = pan360MapY_ = pan360MapUV_ = NULL;
-    videoMapY_ = videoMapUV_ = NULL;
+    cubeMapY_ = cubeMapUV_ = videoMapY_ = videoMapUV_ = eacMapY_ = eacMapUV_ = NULL;
     BL_SAFE_RELEASE(fontFx_);
     BL_SAFE_RELEASE(subtitleFx_);
     BL_SAFE_RELEASE(pan360_);
     BL_SAFE_RELEASE(pan360NV12_);
+    BL_SAFE_RELEASE(cubeNV12_);
+    BL_SAFE_RELEASE(eacNV12_);
     BL_SAFE_RELEASE(videoNV12_);
     BL_SAFE_RELEASE(subtitle_);
     BL_SAFE_RELEASE(uiGlyph_);
@@ -1546,12 +2207,24 @@ void VRVideoPlayer::Finalize()
                 if (offset>0 && 0==fseek(thumbnail_filecache_, offset+8, SEEK_SET)) {
                     user_tweak[0] = (uint8) video->Type();
                     user_tweak[1] = (uint8) video->Type_Intrinsic();
+                    user_tweak[2] = 0;
                     int longi, lati1, lati2;
-                    if (video->GetSphericalAngles(longi, lati1, lati2) && longi<=360) {
-                        user_tweak[2] = (uint8) (longi/6);
+                    if (video->GetSphericalAngles(longi, lati1, lati2)) {
+                        if (longi<=360) {
+                            user_tweak[2] = (uint8) (longi/6);
+                        }
                     }
-                    else {
-                        user_tweak[2] = 0;
+                    else if (video->IsCube()) {
+                        VIDEO_TYPE type;
+                        uint32 layout = 0;
+                        video->GetCubemapLayout(type, layout);
+                        if (layout<256) {
+                            user_tweak[2] = (uint8) layout;
+                        }
+                        else {
+                            user_tweak[2] = (uint8) (layout&0xff);
+                            user_tweak[0] |= 0x80;
+                        }
                     }
 
                     assert(offset+8==ftell(thumbnail_filecache_));
@@ -1592,9 +2265,10 @@ void VRVideoPlayer::Finalize()
     fonts_.for_each(safe_release_functor());
     fonts_.clear();
 
-    // geometry
-    fullsphere_.Destroy();
-    customized_.Destroy();
+    // geometries
+    enclosure_.Destroy();
+    dome_.Destroy();
+    cube_.Destroy();
 }
 //---------------------------------------------------------------------------------------
 inline size_t GetVideoFullFilename(wchar_t* wfilename, int max_length,
@@ -1700,6 +2374,10 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         "360",   // DRAW_TEXT_360
         "180",   // DRAW_TEXT_180
 
+        // 2018.05.02
+        "Cube",  // DRAW_TEXT_CUBE
+        "EAC",   // DRAW_TEXT_EAC
+
         // 2016.08.31
         "Track#", // DRAW_TEXT_TRACK_NO,
         "Subtitle Off", // DRAW_TEXT_SUBTITLE_DISABLE
@@ -1727,7 +2405,7 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
     int text_count(0), texture_count(0);
     int font_texture_size = 2048;
 
-    size_t short_len = swprintf(wfullpath, 256, L"Please Put All Videos in \"%s\" and Try Again.", path);
+    size_t short_len = swprintf(wfullpath, 256, L"No Videos Found in \"%s\"", path);
     fontBlitter.GetTextExtend(sx, sy, UI_TEXT_FONT_PYRAMID, true, wfullpath, (int)short_len);
     while (font_texture_size<sx) {
         font_texture_size *= 2;
@@ -2080,8 +2758,9 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         uint32 name;      // utf8
         uint32 urlLength;
         uint32 nameLength;
-        uint32 sv3d;
+        uint32 st3d;
         uint32 sa3d;
+        uint32 proj, proj1, proj2;
         int    timeout;
     } vfile;
     Array<VideoFile> videoFiles(1024);
@@ -2093,12 +2772,11 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
 
     uint32 const total_livestreams = config.GetTotalLiveStreams();
     for (uint32 i=0; i<total_livestreams; ++i) {
-        uint32 timeout = 0;
-        if (config.GetLiveStreamByIndex(i, name, url, vfile.sv3d, vfile.sa3d, timeout)) {
+        if (config.GetMediaByIndex(i, name, url, vfile.st3d, vfile.sa3d,
+                                   vfile.proj, vfile.proj1, vfile.proj2, &vfile.timeout)) {
             vfile.wfullpath = 0; // no need.
             vfile.url  = text_buffer.Put(url, vfile.urlLength);
             vfile.name = text_buffer.Put(name, vfile.nameLength);
-            vfile.timeout = (int) timeout;
             videoFiles.push_back(vfile);
         }
     }
@@ -2110,7 +2788,8 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
     vfile.timeout = -1; // invalid for local videos
     uint32 const total_extend_local_videos = config.GetTotalVideos();
     for (uint32 i=0; i<total_extend_local_videos; ++i) {
-        if (config.GetVideoByIndex(i, name, url, vfile.sv3d, vfile.sa3d)) {
+        if (config.GetMediaByIndex(i, name, url, vfile.st3d, vfile.sa3d,
+                                   vfile.proj, vfile.proj1, vfile.proj2, NULL)) {
             vfile.wfullpath = 0; // not loaded yet
             if (0==memcmp(url, "$(APP_PATH)/", 12)) {
                 sprintf(fullpath, "./%s", url+12);
@@ -2128,8 +2807,9 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
     vfile.wfullpath = 0; // TBD
     vfile.url  = vfile.urlLength = 0; // TBD
     vfile.name = vfile.nameLength = 0; // TBD
-    vfile.sv3d = vfile.sa3d = 0; // always 0
-    vfile.timeout = -1; // 
+    vfile.st3d = vfile.sa3d = 0; // always 0
+    vfile.proj = vfile.proj1 = vfile.proj2 = 0;
+    vfile.timeout = -1;
 
     int const total_ext_video_paths = config.GetTotalVideoPaths();
     for (int i=-1; i<total_ext_video_paths; ++i) { // -1 is for (default) wfullpath
@@ -2283,50 +2963,32 @@ int VRVideoPlayer::SetMediaPath(wchar_t const* path)
         video->SetFontTexCoord(texture_count, tc);
 
         // tweak 
-        if (0!=vf.sv3d && VIDEO_SOURCE_UNKNOWN==video->Source()) {
+        if (0!=vf.proj && VIDEO_SOURCE_UNKNOWN==video->Source()) {
             VIDEO_TYPE vType = VIDEO_TYPE_2D;
-            int longiSpan = 0;
-            switch (vf.sv3d)
-            {
-            case 1: // 180
-                vType = VIDEO_TYPE_SPHERICAL;
-                longiSpan = 180;
-                break;
 
-            case 2: // 180 SBS
-                vType = VIDEO_TYPE_SPHERICAL_3D_LEFTRIGHT;
-                longiSpan = 180;
-                break;
-
-            case 3: // 180 TB
-                vType = VIDEO_TYPE_SPHERICAL_3D_TOPBOTTOM;
-                longiSpan = 180;
-                break;
-
-            case 4: // 360
-                vType = VIDEO_TYPE_SPHERICAL;
-                longiSpan = 360;
-                break;
-
-            case 5: // 360 SBS
-                vType = VIDEO_TYPE_SPHERICAL_3D_LEFTRIGHT;
-                longiSpan = 360;
-                break;
-
-            case 6: // 360 TB
-                vType = VIDEO_TYPE_SPHERICAL_3D_TOPBOTTOM;
-                longiSpan = 360;
-                break;
-
-            case 7: // SBS
-                vType = VIDEO_TYPE_3D_LEFTRIGHT;
-                break;
-
-            case 8: // TB
-                vType = VIDEO_TYPE_3D_TOPBOTTOM;
-                break;
+            // projection type
+            if (1==vf.proj) { // equirectangular
+                vType = VIDEO_TYPE_EQUIRECT;
             }
-            video->TweakVideoType(vType, longiSpan/6);
+            else if (2==vf.proj) { // cubemap
+                vType = VIDEO_TYPE_CUBEMAP;
+            }
+            else if (3==vf.proj) {
+                vType = VIDEO_TYPE_EAC;
+            }
+
+            // stereoscopic
+            if (1==vf.st3d) {
+                vType = (VIDEO_TYPE) (vType|VIDEO_TYPE_3D_TOPBOTTOM);
+            }
+            else if (2==vf.st3d) {
+                vType = (VIDEO_TYPE) (vType|VIDEO_TYPE_3D_LEFTRIGHT);
+            }
+            else {
+                // ...
+            }
+
+            video->TweakVideoType(vType, vf.proj1, vf.proj2);
         }
 
         if (vf.sa3d!=0 && AUDIO_TECHNIQUE_DEFAULT==video->AudioTechnique()) {
@@ -2575,8 +3237,14 @@ bool VRVideoPlayer::FrameMove()
         int longi(0), lati_south(0), lati_north(0);
         if (current_track_->GetSphericalAngles(longi, lati_south, lati_north)) {
             if (360!=longi || -90!=lati_south || 90!=lati_north) {
-                customized_.Create(longi, lati_south, lati_north);
+                dome_.Create(longi, lati_south, lati_north);
             }
+            else {
+                dome_.Create(180);
+            }
+        }
+        else {
+            dome_.Create(180);
         }
 
         // adjust azimuth angle
@@ -3423,6 +4091,8 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
     // draw spherical video/background
     Matrix3 view(Matrix3::Identity), pose;
     vrMgr_.GetHMDPose(pose, eye);
+
+    // push view matrix(no offset)
     pose.SetOrigin(0.0f, 0.0f, 0.0f);
     gfxBuildViewMatrixFromLTM(view, view.SetEulerAngles(0.0f, 0.0f, azimuth_adjust_)*pose);
     renderer.PushViewMatrix(view);
@@ -3444,12 +4114,31 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
         int longi, lati_south, lati_north;
         current_track_->GetSphericalAngles(longi, lati_south, lati_north);
         if (360==longi && -90==lati_south && 90==lati_north) {
-            fullsphere_.Drawcall();
+            enclosure_.Draw();
         }
         else {
-            customized_.Drawcall();
+            dome_.Draw();
         }
-        renderer.PopViewMatrix();
+    }
+    else if (current_track_->BuildCubemapTexCoordCrop(crop_factor, eye)) {
+        // cubemap video - NV12
+        if (current_track_->IsEAC()) {
+            renderer.SetEffect(eacNV12_);
+            eacNV12_->BindConstant(eacNV12Crop_, crop_factor);
+            videoTexture_.Bind(eacNV12_, eacMapY_, eacMapUV_);
+        }
+        else {
+            renderer.SetEffect(cubeNV12_);
+            cubeNV12_->BindConstant(cubeNV12Crop_, crop_factor);
+            videoTexture_.Bind(cubeNV12_, cubeMapY_, cubeMapUV_);
+        }
+        renderer.CommitChanges();
+
+        // draw with style
+        VIDEO_TYPE type;
+        uint32 layout = 0;
+        current_track_->GetCubemapLayout(type, layout);
+        cube_.Draw(type, layout);
     }
     else {
         // 360 texture as background
@@ -3461,9 +4150,11 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
         float const diffuse[4] = { val, val, val, 1.0f };
         pan360_->BindConstant(pan360Diffuse_, diffuse);
         renderer.CommitChanges();
-        fullsphere_.Drawcall();
-        renderer.PopViewMatrix();
+        enclosure_.Draw();
     }
+
+    // pop view matrix
+    renderer.PopViewMatrix();
 
     // enable Z
     renderer.SetDepthWrite(true);
@@ -3559,7 +4250,7 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
             renderer.SetZTest();
         }
 
-        // subtitle (plane movie)
+        // subtitle (plane 2D movie)
         int const timestamp = decoder_.Timestamp();
         int const subtitle_time = timestamp - subtitle_pts_;
         if (0<subtitle_time && subtitle_time<subtitle_duration_ && subtitle_ && subtitle_rect_count_>0) {

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vivecinema url="https://www.viveport.com/apps/ed3adb70-9390-4ca3-863a-26b5fd08b8d7" ver="1.0.812">
+ <windows width="default" height="default" fullscreen="0" />
+ <libraries path="$(My Videos)/Vive Cinema/">
+   <video decoder="gpu" /> <!-- 'sw' or 'gpu'(if applicable) -->
+ </libraries>
+</vivecinema>

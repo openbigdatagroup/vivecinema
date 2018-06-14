@@ -2079,8 +2079,8 @@ int Subtitle::ASS_Dialogue_Text_(uint8* buffer, int buffer_size, int& width, int
     //
     // if we have both playResX_, playResY_ set but the aspect ratio be huge different
     // from of movieResX_, movieResY_. it may go wrong seriously. must correct it!
-    int corrected_PlayResX(playResY_*movieResX_/movieResY_), corrected_PlayResY(playResY_);
-    //int corrected_PlayResX(playResX_), corrected_PlayResY(playResY_);
+    //int corrected_PlayResX(playResY_*movieResX_/movieResY_), corrected_PlayResY(playResY_);
+    int corrected_PlayResX(playResX_), corrected_PlayResY(playResY_);
 
     int font_size_adj_num = 1000; // numerator
     int const font_size_adj_den = 1000; // denominator

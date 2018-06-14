@@ -188,15 +188,14 @@ void VRVideoPlayer::DrawSubtitle_(mlabs::balai::math::Matrix3 const& xform, int 
                 if (is360) {
                     y0 = -0.01f*rect.Layer;
                     dist = 1.0f + y0;
-                    if (dist<0.0f) {
-                        dist = 0.01f; // could be still invisible
+                    if (dist<0.05f) {
+                        dist = 0.05f; // could be still invisible
                         y0 = dist - 1.0f;
                     }
 
                     dw = dist*tan_half_hfov;
                     dh = dw*rect.PlayResY/rect.PlayResX;
-                    baseline = -dw*0.95f;
-
+                    baseline = -dh*0.95f;
                     ll = -dw + 2.0f*dw*ll/rect.PlayResX;
                     rr = ll + 2.0f*dw*rr/rect.PlayResX;
                     tt = dh - 2.0f*dh*tt/rect.PlayResY + (baseline+dh);
@@ -827,10 +826,10 @@ void VRVideoPlayer::ThumbnailDecodeLoop_()
             assert(video->ThumbnailCache()==(128+(1024*768*3+256)*i));
             assert(ftell(thumbnail_filecache_)==(128+(1024*768*3+256)*(i+1)));
 
-            // video type
+            // custom video type
             //assert(video->Type_Intrinsic()==header[9]); // not always truth!
             if (VIDEO_SOURCE_UNKNOWN==video->Source()) {
-                video->TweakVideoType((VIDEO_TYPE)header[8], header[10]);
+                video->CustomType(header[8], header[10]);
             }
             video->SetSize((header[2]<<8)|header[3], (header[6]<<8)|header[7]);
 
@@ -2010,7 +2009,7 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
     pan360_->BindConstant(pan360Diffuse_, diffuse);
     pan360_->BindSampler(pan360Map_, background_);
     renderer.CommitChanges();
-    fullsphere_.Drawcall();
+    enclosure_.Draw();
     renderer.PopViewMatrix();
 
     Matrix3 dashboard_aniamtion_xform = dashboard_xform_;
@@ -2647,6 +2646,15 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                     t.rt.z1 = z1;
                     decal.x1 = x0 = t.rt.x1 + 0.15f*dz;
                 }
+                else if (video->IsCube()) {
+                    TextRect& t = tags[tags_count++];
+                    t.tc = texcoords_[video->IsEAC() ? DRAW_TEXT_EAC:DRAW_TEXT_CUBE];
+                    t.rt.x0 = x0;
+                    t.rt.x1 = x0 + dz*t.tc.AspectRatio();
+                    t.rt.z0 = z0;
+                    t.rt.z1 = z1;
+                    decal.x1 = x0 = t.rt.x1 + 0.15f*dz;
+                }
                 if (VIDEO_3D_MONO!=s3D) {
                     TextRect& t = tags[tags_count++];
                     t.tc = texcoords_[DRAW_TEXT_3D];
@@ -2804,29 +2812,31 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                 }
 
                 // file name
-                if (0<=id && id<(int)fonts_.size()) {
+                {
                     TexCoord const& tc = video->GetFontTexCoord(id);
-                    if (id!=0) {
-                        prim.EndDraw();
+                    if (0<=id && id<(int)fonts_.size()) {
+                        if (id!=0) {
+                            prim.EndDraw();
 #ifndef USE_SUBTITLE_FONT_SHADER
-                        fontFx_->SetSampler(shader::semantics::diffuseMap, fonts_[id]);
+                            fontFx_->SetSampler(shader::semantics::diffuseMap, fonts_[id]);
 #else
-                        subtitleFx_->SetSampler(shader::semantics::diffuseMap, fonts_[id]);
+                            subtitleFx_->SetSampler(shader::semantics::diffuseMap, fonts_[id]);
 #endif
-                        prim.BeginDraw(GFXPT_QUADLIST);
-                    }
+                            prim.BeginDraw(GFXPT_QUADLIST);
+                        }
 
-                    float const hh = 0.12f*(rect.z0-rect.z1);
-                    float const ww = hh*tc.AspectRatio();
-                    z1 = rect.z1 + 0.1f*hh;
-                    z0 = z1 + hh;
-                    x0 = 0.5f*(rect.x0 + rect.x1) - 0.5f*ww;
-                    x1 = x0 + ww;
-                    prim.SetColor(Color::White);
-                    prim.AddVertex(x0, y, z0, tc.x0, tc.y0);
-                    prim.AddVertex(x0, y, z1, tc.x0, tc.y1);
-                    prim.AddVertex(x1, y, z1, tc.x1, tc.y1);
-                    prim.AddVertex(x1, y, z0, tc.x1, tc.y0);
+                        float const hh = 0.12f*(rect.z0-rect.z1);
+                        float const ww = hh*tc.AspectRatio();
+                        z1 = rect.z1 + 0.1f*hh;
+                        z0 = z1 + hh;
+                        x0 = 0.5f*(rect.x0 + rect.x1) - 0.5f*ww;
+                        x1 = x0 + ww;
+                        prim.SetColor(Color::White);
+                        prim.AddVertex(x0, y, z0, tc.x0, tc.y0);
+                        prim.AddVertex(x0, y, z1, tc.x0, tc.y1);
+                        prim.AddVertex(x1, y, z1, tc.x1, tc.y1);
+                        prim.AddVertex(x1, y, z0, tc.x1, tc.y0);
+                    }
                 }
                 prim.EndDraw();
 
@@ -3153,9 +3163,16 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
                     decal.x1 = decal.x0; // invalid
 
                     x0 = decal.x0 + 0.2f*dz;
-                    if (x0<right_most &&
-                        video->GetSphericalAngles(longi, lat_inf, lati_sup)) {
-                        TexCoord const& tc = texcoords_[(180==longi) ? DRAW_TEXT_180:DRAW_TEXT_360];
+                    longi = 0;
+                    if (x0<right_most && video->IsSpherical()) {
+                        int text_to_show = DRAW_TEXT_360;
+                        if (video->IsCube()) {
+                            text_to_show = video->IsEAC() ? DRAW_TEXT_EAC:DRAW_TEXT_CUBE;
+                        }
+                        else if (video->GetSphericalAngles(longi, lat_inf, lati_sup) && 180==longi) {
+                            text_to_show = DRAW_TEXT_180;
+                        }
+                        TexCoord const& tc = texcoords_[text_to_show];
                         x1 = x0 + dz*tc.AspectRatio();
                         decal.x1 = x1 + 0.15f*dz;
                         if (x1>left_most) {

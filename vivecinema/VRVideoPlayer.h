@@ -102,16 +102,16 @@ enum VIDEO_SOURCE {
 
     // https://github.com/google/spatial-media/blob/master/docs/spherical-video-rfc.md
     VIDEO_SOURCE_GOOGLE_JUMP = 1,
-    VIDEO_SOURCE_GOOGLE_JUMP_RFC2 = (1<<1)|VIDEO_SOURCE_GOOGLE_JUMP,
 
-    VIDEO_SOURCE_USER_DEFINED = (1<<3),
+    // https://github.com/google/spatial-media/blob/master/docs/spherical-video-v2-rfc.md
+    VIDEO_SOURCE_GOOGLE_JUMP_RFC2 = (1<<1)|VIDEO_SOURCE_GOOGLE_JUMP,
 
     // more normal sources to come...
 
     // nasty video types
     VIDEO_SOURCE_VIEWER_DISCRETION_IS_ADVICED = (1<<16),
 
-    // www.virtualrealporn.com
+    // www.virtualrealporn.com, sorry mom~
     VIDEO_SOURCE_VIRTUALREAL_PORN = VIDEO_SOURCE_VIEWER_DISCRETION_IS_ADVICED | 1,
 
     // more nasty sources to come...
@@ -127,15 +127,31 @@ enum VIDEO_TYPE {
 
     VIDEO_TYPE_3D_MASK = 7,
 
+    // Equirectangular
+    VIDEO_TYPE_EQUIRECT = (1<<4), 
+
+    // Cube
+    VIDEO_TYPE_CUBEMAP = (1<<5), // Cubemap
+    VIDEO_TYPE_EAC = (1<<6), // Equi-Angular Cubemap
+    VIDEO_TYPE_CUBE = VIDEO_TYPE_CUBEMAP | VIDEO_TYPE_EAC,
+
     // spherical video
-    VIDEO_TYPE_SPHERICAL = 1<<4,
+    VIDEO_TYPE_SPHERICAL = VIDEO_TYPE_EQUIRECT | VIDEO_TYPE_CUBE,
 
     // Google's Jump VR
-    VIDEO_TYPE_SPHERICAL_3D_TOPBOTTOM = VIDEO_TYPE_SPHERICAL | VIDEO_TYPE_3D_TOPBOTTOM,
+    VIDEO_TYPE_EQUIRECT_3D_TOPBOTTOM = VIDEO_TYPE_EQUIRECT | VIDEO_TYPE_3D_TOPBOTTOM,
 
     // this may be an ill format for entire 360 scene, but, this is also a
     // strongly desired format accoding to viveport users feedback.
-    VIDEO_TYPE_SPHERICAL_3D_LEFTRIGHT = VIDEO_TYPE_SPHERICAL | VIDEO_TYPE_3D_LEFTRIGHT,
+    VIDEO_TYPE_EQUIRECT_3D_LEFTRIGHT = VIDEO_TYPE_EQUIRECT | VIDEO_TYPE_3D_LEFTRIGHT,
+
+    // RFC V2
+    VIDEO_TYPE_CUBEMAP_3D_TOPBOTTOM = VIDEO_TYPE_CUBEMAP | VIDEO_TYPE_3D_TOPBOTTOM, // not support!
+    VIDEO_TYPE_CUBEMAP_3D_LEFTRIGHT = VIDEO_TYPE_CUBEMAP | VIDEO_TYPE_3D_LEFTRIGHT,
+
+    // EAC
+    VIDEO_TYPE_EAC_3D_TOPBOTTOM = VIDEO_TYPE_EAC | VIDEO_TYPE_3D_TOPBOTTOM, // not support!
+    VIDEO_TYPE_EAC_3D_LEFTRIGHT = VIDEO_TYPE_EAC | VIDEO_TYPE_3D_LEFTRIGHT,
 };
 
 // spatial audio 3D
@@ -171,9 +187,11 @@ class VideoTrack
     int        font_texture_id_;
     int        width_;
     int        height_;
-    int        spherical_longitude_;
-    int        spherical_latitude_south_;
-    int        spherical_latitude_north_;
+    int        equirect_longitude_;
+    int        equirect_latitude_south_;
+    int        equirect_latitude_north_;
+    uint32     cubemap_layout_;
+    uint32     cubemap_padding_;
     int        thumbnail_cache_;
     int        timeout_;  // if lag, the timeout to restart in milliseconds
     int        duration_; // read from formatCtx->duration, in milliseconds.
@@ -200,9 +218,9 @@ public:
     }
 
     // video type & tweak
-    VIDEO_TYPE Type() const { return type_; }
-    VIDEO_TYPE Type_Intrinsic() const { return type_intrinsic_; }
     VIDEO_SOURCE Source() const { return source_; }
+    VIDEO_TYPE Type() const { return type_; }
+    VIDEO_TYPE Type_Intrinsic() const { return type_intrinsic_; } // from video metadata
     bool IsLiveStream() const { return liveStream_; }
 
     // time is the period to restart playback, in milliseconds.
@@ -218,9 +236,11 @@ public:
     }
 
     bool IsSpherical() const { return 0!=(VIDEO_TYPE_SPHERICAL&type_); }
-    VIDEO_3D Stereoscopic3D() const {
-        return (VIDEO_3D) (type_ & VIDEO_TYPE_3D_MASK);
-    }
+    bool IsEquirectangular() const { return 0!=(VIDEO_TYPE_EQUIRECT&type_); }
+    bool IsCube() const { return 0!=(VIDEO_TYPE_CUBE&type_); } // cubemap and EAC
+    bool IsEAC() const { return 0!=(VIDEO_TYPE_EAC&type_); }
+
+    VIDEO_3D Stereoscopic3D() const { return (VIDEO_3D) (type_&VIDEO_TYPE_3D_MASK); }
 
     AUDIO_TECHNIQUE AudioTechnique() const { return sa3d_.Technique; }
     bool TweakAudioTechnique(AUDIO_TECHNIQUE tech) {
@@ -257,7 +277,7 @@ public:
             param.AudioSetting.TotalChannels = sa3d_.TotalChannels;
         }
         else {
-            if (0!=(VIDEO_TYPE_SPHERICAL&type_)) { // definitely need to check this...
+            if (0!=(VIDEO_TYPE_SPHERICAL&type_)) {
                 param.AudioSetting.Technique = AUDIO_TECHNIQUE_AMBIX;
                 param.AudioSetting.Format = AUDIO_FORMAT_F32;
                 param.AudioSetting.SampleRate = 48000;
@@ -265,17 +285,190 @@ public:
         }
     }
 
+    // user tweaked type
+    bool CustomType(uint8 tt, uint8 param) {
+        VIDEO_TYPE type = (VIDEO_TYPE) (tt&~0x80);
+        switch (type)
+        {
+        case VIDEO_TYPE_CUBEMAP: // Cubemap
+        case VIDEO_TYPE_CUBEMAP_3D_TOPBOTTOM:
+        case VIDEO_TYPE_CUBEMAP_3D_LEFTRIGHT:
+        case VIDEO_TYPE_EAC: // Equi-Angular Cubemap
+        case VIDEO_TYPE_EAC_3D_TOPBOTTOM:
+        case VIDEO_TYPE_EAC_3D_LEFTRIGHT:
+            type_ = type;
+            cubemap_layout_ = param;
+            if (tt&0x80) {
+                cubemap_layout_ += 256;
+            }
+            return true;
+
+        case VIDEO_TYPE_EQUIRECT:
+        case VIDEO_TYPE_EQUIRECT_3D_TOPBOTTOM:
+        case VIDEO_TYPE_EQUIRECT_3D_LEFTRIGHT:
+            equirect_longitude_ = (30!=param) ? 360:180;
+            if (equirect_latitude_south_>=equirect_latitude_north_ ||
+                equirect_latitude_south_<-90 ||
+                equirect_latitude_north_>90) {
+                equirect_latitude_south_ = -90;
+                equirect_latitude_north_ = 90;
+            }
+            // fall through
+        case VIDEO_TYPE_3D_TOPBOTTOM: // plane
+        case VIDEO_TYPE_3D_LEFTRIGHT:
+        case VIDEO_TYPE_3D_BOTTOMTOP:
+        case VIDEO_TYPE_3D_RIGHTLEFT:
+            type_ = type;
+            return true;
+
+        default:
+            break;
+        }
+        return false;
+    }
+
+    // toggle spherical video type
+    // plane -> equirectangular180 -> equirectangular360 -> cubemap360 -> eac360 -> plane
+    void TweakVideoType() {
+        //
+        // 1) is s3D legal for the new spherical type 
+        // 2) it may need to rebuild vao. but not here(must be in render thread)
+        //    (build all possible vertex data in one vao? use the offet)
+        VIDEO_TYPE const s3D = (VIDEO_TYPE) (VIDEO_TYPE_3D_MASK&type_);
+
+        switch ((VIDEO_TYPE) (VIDEO_TYPE_SPHERICAL&type_))
+        {
+        case VIDEO_TYPE_EQUIRECT:
+            if (360==equirect_longitude_) {
+                if (VIDEO_TYPE_2D!=s3D) {
+                    type_ = VIDEO_TYPE_CUBEMAP_3D_LEFTRIGHT;
+                }
+                else {
+                    type_ = VIDEO_TYPE_CUBEMAP;
+                }
+                cubemap_layout_ = 0;
+            }
+            else {
+                equirect_longitude_ = 360;
+            }
+            break;
+
+        case VIDEO_TYPE_CUBEMAP:
+            if (0==cubemap_layout_) {
+                cubemap_layout_ = 256;
+            }
+            else if (256==cubemap_layout_) {
+                cubemap_layout_ = 257;
+            }
+            else {
+                assert(257==cubemap_layout_);
+                if (VIDEO_TYPE_2D!=s3D) {
+                    type_ = VIDEO_TYPE_EAC_3D_LEFTRIGHT;
+                }
+                else {
+                    type_ = VIDEO_TYPE_EAC;
+                }
+                cubemap_layout_ = 0;
+            }
+            break;
+
+        case VIDEO_TYPE_EAC:
+            if (0==cubemap_layout_) {
+                cubemap_layout_ = 256;
+            }
+            else if (256==cubemap_layout_) {
+                cubemap_layout_ = 257;
+            }
+            else {
+                assert(257==cubemap_layout_);
+                type_ = (VIDEO_TYPE) (VIDEO_TYPE_2D | s3D);
+                cubemap_layout_ = 0;
+            }
+            break;
+
+        default:
+            type_ = (VIDEO_TYPE) (VIDEO_TYPE_EQUIRECT | s3D);
+            equirect_longitude_ = 180;
+            if (equirect_latitude_south_>=equirect_latitude_north_ ||
+                equirect_latitude_south_<-90 || equirect_latitude_north_>90) {
+                equirect_latitude_south_ = -90;
+                equirect_latitude_north_ = 90;
+            }
+            break;
+        }
+    }
+
+    void TweakCubemap() {
+        if (VIDEO_TYPE_CUBEMAP&type_) {
+            type_ = (VIDEO_TYPE) (VIDEO_TYPE_EAC | (VIDEO_TYPE_3D_MASK&type_));
+        }
+        else if (VIDEO_TYPE_EAC&type_) {
+            type_ = (VIDEO_TYPE) (VIDEO_TYPE_CUBEMAP | (VIDEO_TYPE_3D_MASK&type_));
+        }
+    }
+
+    bool TweakVideoSphericalLongitudeSpan(int longitude_span=360) { // menu widget used only
+        if (type_&VIDEO_TYPE_EQUIRECT) {
+            equirect_longitude_ = longitude_span;
+            return true;
+        }
+        return false;
+    }
+
+    void TweakStereoscopic3D() {
+        VIDEO_TYPE const s3D = (VIDEO_TYPE) (VIDEO_TYPE_3D_MASK&type_);
+        if (type_&VIDEO_TYPE_EQUIRECT) {
+            if (VIDEO_TYPE_3D_TOPBOTTOM==s3D) {
+                type_ = (VIDEO_TYPE) (VIDEO_TYPE_EQUIRECT | VIDEO_TYPE_3D_LEFTRIGHT);
+            }
+            else if (VIDEO_TYPE_3D_LEFTRIGHT==s3D) {
+                type_ = VIDEO_TYPE_EQUIRECT;
+            }
+            else {
+                type_ = (VIDEO_TYPE) (VIDEO_TYPE_EQUIRECT | VIDEO_TYPE_3D_TOPBOTTOM);
+            }
+        }
+        else if (type_&VIDEO_TYPE_CUBE) { // Mono <--> L|R
+            if (VIDEO_TYPE_2D==s3D) {
+                type_ = (VIDEO_TYPE) ((type_&VIDEO_TYPE_CUBE) | VIDEO_TYPE_3D_LEFTRIGHT);
+            }
+            else {
+                type_ = (VIDEO_TYPE) ((type_&VIDEO_TYPE_CUBE) | VIDEO_TYPE_2D);
+            }
+        }
+        else {
+            if (VIDEO_TYPE_3D_TOPBOTTOM==s3D) {
+                type_ = VIDEO_TYPE_3D_LEFTRIGHT;
+            }
+            else if (VIDEO_TYPE_3D_LEFTRIGHT==s3D) {
+                type_ = VIDEO_TYPE_3D_BOTTOMTOP;
+            }
+            else if (VIDEO_TYPE_3D_BOTTOMTOP==s3D) {
+                type_ = VIDEO_TYPE_3D_RIGHTLEFT;
+            }
+            else if (VIDEO_TYPE_3D_RIGHTLEFT==s3D) {
+                type_ = VIDEO_TYPE_2D;
+            }
+            else { // mono
+                type_ = VIDEO_TYPE_3D_TOPBOTTOM;
+            }
+        }
+    }
+
     bool TweakVideo3D(VIDEO_3D s3D) {
         //timestamp_ = 0;
-        if (type_ & VIDEO_TYPE_SPHERICAL) {
+        if (type_&VIDEO_TYPE_EQUIRECT) {
             if (VIDEO_3D_MONO==s3D ||
                 VIDEO_3D_TOPBOTTOM==s3D ||
                 VIDEO_3D_LEFTRIGHT==s3D) {
-                type_ = (VIDEO_TYPE) (VIDEO_TYPE_SPHERICAL | s3D);
+                type_ = (VIDEO_TYPE) (VIDEO_TYPE_EQUIRECT | s3D);
             }
             else {
                 return false;
             }
+        }
+        else if (type_&VIDEO_TYPE_CUBEMAP) {
+            // 123
         }
         else {
             type_ = (VIDEO_TYPE) s3D;
@@ -284,77 +477,89 @@ public:
     }
     void TweakVideoSpherical() {
         //timestamp_ = 0;
-        if (type_ & VIDEO_TYPE_SPHERICAL) {
-            type_ = (VIDEO_TYPE) (type_ & VIDEO_TYPE_3D_MASK);
-            spherical_longitude_ = 0;
-            spherical_latitude_south_ = 0;
-            spherical_latitude_north_ = 0;
+        if (type_&VIDEO_TYPE_EQUIRECT) {
+            type_ = (VIDEO_TYPE) (type_&VIDEO_TYPE_3D_MASK);
+            equirect_longitude_ = 0;
+            equirect_latitude_south_ = 0;
+            equirect_latitude_north_ = 0;
         }
         else {
             if (type_==VIDEO_TYPE_2D) {
-                type_ = VIDEO_TYPE_SPHERICAL;
+                type_ = VIDEO_TYPE_EQUIRECT;
             }
-            else if (type_ & VIDEO_TYPE_3D_TOPBOTTOM) {
-                type_ = VIDEO_TYPE_SPHERICAL_3D_TOPBOTTOM;
+            else if (type_&VIDEO_TYPE_3D_TOPBOTTOM) {
+                type_ = VIDEO_TYPE_EQUIRECT_3D_TOPBOTTOM;
             }
             else {
-                type_ = VIDEO_TYPE_SPHERICAL_3D_LEFTRIGHT;
+                type_ = VIDEO_TYPE_EQUIRECT_3D_LEFTRIGHT;
             }
-            spherical_longitude_ = 360;
-            spherical_latitude_south_ = -90;
-            spherical_latitude_north_ = 90;
+            equirect_longitude_ = 360;
+            equirect_latitude_south_ = -90;
+            equirect_latitude_north_ = 90;
         }
     }
-    bool TweakVideoSphericalLongitudeSpan(int longitude_span=360) { // menu widget used only
-        if (type_ & VIDEO_TYPE_SPHERICAL) {
-            spherical_longitude_ = longitude_span;
-            return true;
-        }
-        return false;
-    }
-    bool TweakVideoType(VIDEO_TYPE type, int param) {
+
+    bool TweakVideoType(VIDEO_TYPE type, uint32 proj1, uint32 proj2) {
         switch (type)
         {
         case VIDEO_TYPE_2D:
         case VIDEO_TYPE_3D_LEFTRIGHT:
         case VIDEO_TYPE_3D_TOPBOTTOM:
-            spherical_longitude_ = 0;
-            spherical_latitude_south_ = 0;
-            spherical_latitude_north_ = 0;
             type_ = type;
             break;
 
-        case VIDEO_TYPE_SPHERICAL:
-        case VIDEO_TYPE_SPHERICAL_3D_TOPBOTTOM:
-        case VIDEO_TYPE_SPHERICAL_3D_LEFTRIGHT:
-            spherical_longitude_ = (30!=param) ? 360:180;
-            spherical_latitude_south_ = -90;
-            spherical_latitude_north_ = 90;
+        case VIDEO_TYPE_EQUIRECT:
+        case VIDEO_TYPE_EQUIRECT_3D_TOPBOTTOM:
+        case VIDEO_TYPE_EQUIRECT_3D_LEFTRIGHT:
+            equirect_longitude_ = proj1;
+            equirect_latitude_north_ = proj2/2;
+            equirect_latitude_south_ = -equirect_latitude_north_;
             type_ = type;
+            break;
+
+        case VIDEO_TYPE_CUBEMAP:
+        case VIDEO_TYPE_CUBEMAP_3D_TOPBOTTOM:
+        case VIDEO_TYPE_CUBEMAP_3D_LEFTRIGHT:
+        case VIDEO_TYPE_EAC:
+        case VIDEO_TYPE_EAC_3D_TOPBOTTOM:
+        case VIDEO_TYPE_EAC_3D_LEFTRIGHT:
+            type_ = type;
+
+            // proj1 : predefined layouts
+            if (1==proj1) {
+                cubemap_layout_ = 256; // 2x3 offcenter
+            }
+            else if (2==proj1) {
+                cubemap_layout_ = 257; // youtube
+            }
+            else {
+                cubemap_layout_ = 0; // 3x2
+            }
+
+            // proj2 : padding
+            cubemap_padding_ = proj2;
+
             break;
 
         default:
             return false;
         }
         return true;
-    }/*
-    bool SetSphericalAngles(VIDEO_TYPE type, int longi_span, int lati_south, int lati_north) {
-        if (0!=(VIDEO_TYPE_SPHERICAL&type) && longi_span>15 &&
-            -90<=lati_south && lati_south<lati_north && lati_north<=90) {
-            type_ = type;
-            spherical_longitude_ = longi_span;
-            spherical_latitude_south_ = lati_south;
-            spherical_latitude_north_ = lati_north;
-            source_ = VIDEO_SOURCE_USER_DEFINED;
+    }
+
+    bool GetSphericalAngles(int& longi, int& lati_south, int& lati_north) const {
+        if (0!=(VIDEO_TYPE_EQUIRECT&type_)) {
+            longi = equirect_longitude_;
+            lati_south = equirect_latitude_south_;
+            lati_north = equirect_latitude_north_;
             return true;
         }
         return false;
-    }*/
-    bool GetSphericalAngles(int& longi, int& lati_south, int& lati_north) const {
-        if (0!=(VIDEO_TYPE_SPHERICAL&type_)) {
-            longi = spherical_longitude_;
-            lati_south = spherical_latitude_south_;
-            lati_north = spherical_latitude_north_;
+    }
+    bool GetCubemapLayout(VIDEO_TYPE& type, uint32& layout) const {
+        if (0!=(type_&VIDEO_TYPE_CUBE)) {
+            type   = type_;
+            layout = cubemap_layout_;
             return true;
         }
         return false;
@@ -365,7 +570,7 @@ public:
         coeff[1] = 0.15915494309189533576888376337251f; // horizontal texcoord scale:1/2pi
         coeff[2] = 0.0f; // latitude top texcoord
         coeff[3] = 0.31830988618379067153776752674503f; // vertical texcoord scale:1/pi
-        if (0!=(VIDEO_TYPE_SPHERICAL&type_)) {
+        if (0!=(VIDEO_TYPE_EQUIRECT&type_)) {
             switch (type_&VIDEO_TYPE_3D_MASK)
             {
             case VIDEO_3D_LEFTRIGHT:
@@ -383,15 +588,89 @@ public:
             }
 
             // texcoord offset/scaling if not cover 360x180
-            if (spherical_longitude_<360) {
-                coeff[1] *= 360.0f/float(spherical_longitude_);
+            if (equirect_longitude_<360) {
+                coeff[1] *= 360.0f/float(equirect_longitude_);
             }
 
-            assert(spherical_latitude_south_<spherical_latitude_north_);
-            if (-90<spherical_latitude_south_ || spherical_latitude_north_<90) {
-                coeff[3] *= 180.0f/float(spherical_latitude_north_-spherical_latitude_south_);
-                if (spherical_latitude_north_<90) {
-                    coeff[2] = 0.0174532925f*(((float)spherical_latitude_north_-90.0f))*coeff[3];
+            assert(equirect_latitude_south_<equirect_latitude_north_);
+            if (-90<equirect_latitude_south_ || equirect_latitude_north_<90) {
+                coeff[3] *= 180.0f/float(equirect_latitude_north_-equirect_latitude_south_);
+                if (equirect_latitude_north_<90) {
+                    coeff[2] = 0.0174532925f*(((float)equirect_latitude_north_-90.0f))*coeff[3];
+                }
+            }
+
+            return true;
+        }
+        return false;
+    }
+    bool BuildCubemapTexCoordCrop(float coeff[4], mlabs::balai::VR::HMD_EYE eye) const {
+        //
+        // https://blog.google/products/google-vr/bringing-pixels-front-and-center-vr-video/
+        //
+        if (0!=(VIDEO_TYPE_CUBE&type_)) {
+            //
+            // setup texcoord scale so no seams are noticeable.
+            // tweak CubeGeometry::Create() for even detail alignments.
+            //
+            if (0<cubemap_padding_ && 0<width_ && 0<height_) {
+                float grid_x, grid_y;
+                if (type_&(VIDEO_TYPE_3D_LEFTRIGHT|VIDEO_TYPE_3D_RIGHTLEFT)) {
+                    grid_x = width_/4.0f;
+                    grid_y = height_/3.0f;
+                }
+                else {
+                    if (256==cubemap_layout_) {
+                        // CUBEMAP_23_OFFCENTER
+                        grid_x = width_/2.0f;
+                        grid_y = height_/3.0f;
+                    }
+                    else {
+                        // CUBEMAP_32 - 3 columns and 2 rows
+                        grid_x = width_/3.0f;
+                        grid_y = height_/2.0f;
+                    }
+                }
+
+                float const padding_pixels_2x = 2.0f*cubemap_padding_;
+                coeff[0] = 1.0f - padding_pixels_2x/grid_x;
+                if (coeff[0]<0.75f) {
+                    coeff[0] = 0.75f;
+                }
+
+                coeff[1] = 1.0f - padding_pixels_2x/grid_y;
+                if (coeff[1]<0.75f) {
+                    coeff[1] = 0.75f;
+                }
+            }
+            else {
+                // do the best guess, but no guarantee.
+                if (257==cubemap_layout_) {
+                    // EAC from YouTube. No, I'm not really sure about this.
+                    coeff[0] = coeff[1] = 0.999f;
+                }
+                else {
+                    // facebook's transform360 with expand_coef=1.01
+                    coeff[0] = coeff[1] = 1.0f/1.01f; // = 0.990099
+                }
+            }
+
+            // texcoord offsets
+            coeff[2] = 0.0f; // u offset
+            coeff[3] = 0.0f; // v offset
+            if (mlabs::balai::VR::HMD_EYE_RIGHT==eye) {
+                switch (type_&VIDEO_TYPE_3D_MASK)
+                {
+                case VIDEO_3D_LEFTRIGHT:
+                    coeff[2] = 0.5f;
+                    break;
+
+                case VIDEO_3D_TOPBOTTOM:
+                    coeff[3] = 0.5f;
+                    break;
+
+                default:
+                    break;
                 }
             }
 
@@ -462,9 +741,13 @@ public:
     float AspectRatio() const { // aspect ration in plane mode
         assert(height_>0);
         if (height_>0) {
-            if (type_&VIDEO_TYPE_SPHERICAL) {
+            if (type_&VIDEO_TYPE_EQUIRECT) {
                 // for equalrectangular projection and assuming pixel aspect ration = 1:1
-                return (float)spherical_longitude_/(float)(spherical_latitude_north_-spherical_latitude_south_);
+                return (float)equirect_longitude_/(float)(equirect_latitude_north_-equirect_latitude_south_);
+            }
+            else if (type_&VIDEO_TYPE_CUBE) {
+                // cubemap, to be determined
+                return float(width_)/float(height_);
             }
             else {
                 float aspect_ratio = float(width_)/float(height_);
@@ -524,13 +807,16 @@ public:
 
 class VRVideoConfig {
     struct Media {
-        uint32 name; // pos
-        uint32 url;  // pos
-        uint32 sv3d; // 0:2D or N/A,
-                     // 1:180, 2:180+sbs, 3:180+tb
-                     // 4:360, 5:360+sbs, 6:360+tb
-                     // 7:sbs, 8:tb
-        uint32 sa3d; // 1:fuma, 2:ambiX, 0:not specified
+        uint32 name; // offset to string pool
+        uint32 url;  // offset to string pool
+        uint32 st3d; // stereoscopic 3D, 0:mono, 1:top-bottom, 2:left-right, 3:Stereoscopic Stereo-Custom
+        uint32 sa3d; // 0:default, 1:fuma, 2:ambiX
+
+        // sv3d parameters
+        uint32 proj;  // 0:2D or N/A, 1:equirectangular, 2:cubemap, 3:eac
+        uint32 proj1; // longitude if equirectangular; layout if cubemap
+        uint32 proj2; // latitude if equirectangular; padding if cubemap
+                     
         uint32 timeout;
     };
 
@@ -549,27 +835,40 @@ class VRVideoConfig {
 public:
     explicit VRVideoConfig(wchar_t const* xml);
 
-    bool AddLiveStream(char const* name, char const* url, uint32 sv3d, uint32 sa3d, uint32 timeout) {
-        if (NULL!=name && NULL!=url) {
+    bool AddMedia(char const* name, char const* url,
+                  uint32 st3d, uint32 sa3d,
+                  uint32 proj, uint32 proj1, uint32 proj2,
+                  uint32 timeout, bool isLiveStream) {
+        if (NULL!=url && (!isLiveStream||NULL!=name)) {
             uint32 const crc = stringPool_.HashString(url);
             if (!stringPool_.Find(crc)) {
                 Media s;
-                s.name = stringPool_.AddString(name);
-                s.url = stringPool_.AddString(url);
-                s.sv3d = sv3d;
+                s.name = (NULL!=name) ? stringPool_.AddString(name):0;
+                s.url  = stringPool_.AddString(url);
+                s.st3d = st3d;
                 s.sa3d = sa3d;
-                s.timeout = timeout;
+                s.proj = proj;
+                s.proj1 = proj1; // longitude | layout
+                s.proj2 = proj2; // latitude  | padding
+
                 try {
-                    liveStreams_.push_back(s);
+                    if (isLiveStream) {
+                        s.timeout = timeout;
+                        liveStreams_.push_back(s);
+                    }
+                    else {
+                        s.timeout = 0;
+                        videos_.push_back(s);
+                    }
                     return true;
                 }
                 catch (...) {
-                    return false;
                 }
             }
         }
         return false;
     }
+
     bool AddVideoPath(char const* name, char const* url) {
         if (NULL!=url) {
             uint32 const crc = stringPool_.HashString(url);
@@ -588,42 +887,10 @@ public:
         }
         return false;
     }
-    bool AddVideo(char const* name, char const* url, uint32 sv3d, uint32 sa3d) {
-        if (NULL!=url) {
-            uint32 const crc = stringPool_.HashString(url);
-            if (!stringPool_.Find(crc)) {
-                Media s;
-                s.name = (NULL!=name) ? stringPool_.AddString(name):0;
-                s.url = stringPool_.AddString(url);
-                s.sv3d = sv3d;
-                s.sa3d = sa3d;
-                try {
-                    videos_.push_back(s);
-                    return true;
-                }
-                catch (...) {
-                    return false;
-                }
-            }
-        }
-        return false;
-    }
 
-    uint32 GetTotalLiveStreams() const { return (0==fails_) ? liveStreams_.size():0; }
     uint32 GetTotalVideoPaths() const { return (0==fails_) ? videoPaths_.size():0; }
+    uint32 GetTotalLiveStreams() const { return (0==fails_) ? liveStreams_.size():0; }
     uint32 GetTotalVideos() const { return (0==fails_) ? videos_.size():0; }
-    bool GetLiveStreamByIndex(uint32 id, char const*& name, char const*& url, uint32& sv3d, uint32& sa3d, uint32& timeout) const {
-        name = url = NULL;
-        if (id<liveStreams_.size()) {
-            Media const& s = liveStreams_[id];
-            name = stringPool_.Lookup(s.name);
-            url = stringPool_.Lookup(s.url);
-            sv3d = s.sv3d;
-            sa3d = s.sa3d;
-            timeout = s.timeout;
-        }
-        return NULL!=name && NULL!=url;
-    }
     bool GetVideoPathByIndex(uint32 id, char const*& name, char const*& url) const {
         name = url = NULL;
         if (id<videoPaths_.size()) {
@@ -638,14 +905,33 @@ public:
         }
         return NULL!=name && NULL!=url;
     }
-    bool GetVideoByIndex(uint32 id, char const*& name, char const*& url, uint32& sv3d, uint32& sa3d) const {
+
+    bool GetMediaByIndex(uint32 id, char const*& name, char const*& url,
+                         uint32& st3d, uint32& sa3d,
+                         uint32& proj, uint32& proj1, uint32& proj2,
+                         int* livestream_timeout = NULL) const {
         name = url = NULL;
-        if (id<videos_.size()) {
+        if (NULL!=livestream_timeout) {
+            if (id<liveStreams_.size()) {
+                Media const& s = liveStreams_[id];
+                if (s.url) {
+                    url = stringPool_.Lookup(s.url);
+                    if (s.name) {
+                        name = stringPool_.Lookup(s.name);
+                    }
+                }
+                st3d = s.st3d;
+                sa3d = s.sa3d;
+                proj = s.proj;
+                proj1 = s.proj1;
+                proj2 = s.proj2;
+                *livestream_timeout = (int) s.timeout;
+            }
+        }
+        else if (id<videos_.size()) {
             Media const& s = videos_[id];
-            url = stringPool_.Lookup(s.url);
-            sv3d = s.sv3d;
-            sa3d = s.sa3d;
-            if (NULL!=url) {
+            if (s.url) {
+                url = stringPool_.Lookup(s.url);
                 if (s.name) {
                     name = stringPool_.Lookup(s.name);
                 }
@@ -660,6 +946,11 @@ public:
                     }
                 }
             }
+            st3d = s.st3d;
+            sa3d = s.sa3d;
+            proj = s.proj;
+            proj1 = s.proj1;
+            proj2 = s.proj2;
         }
         return NULL!=name && NULL!=url;
     }
@@ -717,6 +1008,9 @@ class VRVideoPlayer : public IAVDecoderHost
         DRAW_TEXT_VR,
         DRAW_TEXT_360,
         DRAW_TEXT_180,
+
+        DRAW_TEXT_CUBE, // cubemap
+        DRAW_TEXT_EAC,  // EAC - Equi-Angular Cubemap
 
         DRAW_TEXT_TRACK_NO, // "Track#"
         DRAW_TEXT_SUBTITLE_DISABLE, // "Subtitle Off"
@@ -873,6 +1167,14 @@ class VRVideoPlayer : public IAVDecoderHost
     mlabs::balai::graphics::shader::Constant const* pan360NV12Crop_;
     mlabs::balai::graphics::shader::Sampler const* pan360MapY_;
     mlabs::balai::graphics::shader::Sampler const* pan360MapUV_;
+    mlabs::balai::graphics::ShaderEffect* cubeNV12_;
+    mlabs::balai::graphics::shader::Constant const* cubeNV12Crop_;
+    mlabs::balai::graphics::shader::Sampler const* cubeMapY_;
+    mlabs::balai::graphics::shader::Sampler const* cubeMapUV_;
+    mlabs::balai::graphics::ShaderEffect* eacNV12_;
+    mlabs::balai::graphics::shader::Constant const* eacNV12Crop_;
+    mlabs::balai::graphics::shader::Sampler const* eacMapY_;
+    mlabs::balai::graphics::shader::Sampler const* eacMapUV_;
     mlabs::balai::graphics::ShaderEffect* videoNV12_;
     mlabs::balai::graphics::shader::Sampler const* videoMapY_;
     mlabs::balai::graphics::shader::Sampler const* videoMapUV_;
@@ -892,6 +1194,27 @@ class VRVideoPlayer : public IAVDecoderHost
     int    thumbnailBufferSize_;
     int    audioBufferSize_;
 
+    // Tetrahedron - the simplest geometry to draw full sphere(360x180) VR videos
+    struct Tetrahedron {
+        GLuint vao_, vbo_;
+        Tetrahedron():vao_(0),vbo_(0) {}
+        ~Tetrahedron() { Destroy(); }
+        bool Create();
+        void Destroy() {
+            if (vao_) { glDeleteVertexArrays(1, &vao_); }
+            if (vbo_) { glDeleteBuffers(1, &vbo_); }
+            vao_ = vbo_ = 0;
+        }
+        bool Draw() const {
+            if (vao_) {
+                glBindVertexArray(vao_);
+                glDrawArrays(GL_TRIANGLES, 0, 12);
+                return true;
+            }
+            return false;
+        }
+    } enclosure_;
+
     // sphere geometry
     struct SphereGeometry {
         enum { NUM_LONGITUDES = 24, NUM_LATITUDES = 12 };
@@ -901,7 +1224,7 @@ class VRVideoPlayer : public IAVDecoderHost
         SphereGeometry():vao_(0),vbo_(0),ibo_(0),num_indices_(0),
             longitude_(0),latitude_south_(0),latitude_north_(0) {}
         ~SphereGeometry() { Destroy(); }
-        bool Create(int longitude=360, int latitude_south=-90, int latitude_north=90);
+        bool Create(int longitude, int latitude_south=-90, int latitude_north=90);
         void Destroy() {
             if (vao_) {
                 glDeleteVertexArrays(1, &vao_);
@@ -915,7 +1238,7 @@ class VRVideoPlayer : public IAVDecoderHost
             vao_ = vbo_ = ibo_ = 0; num_indices_ = 0;
             longitude_ = latitude_south_ = latitude_north_ = 0;
         }
-        bool Drawcall() const {
+        bool Draw() const {
             if (vao_ && num_indices_>0) {
                 glBindVertexArray(vao_);
                 glDrawElements(GL_TRIANGLE_STRIP, num_indices_, GL_UNSIGNED_SHORT, 0);
@@ -924,7 +1247,24 @@ class VRVideoPlayer : public IAVDecoderHost
             }
             return false;
         }
-    } fullsphere_, customized_;
+    } dome_;
+
+    struct CubeGeometry {
+        GLuint vao_, vbo_;
+        CubeGeometry():vao_(0),vbo_(0) {}
+        ~CubeGeometry() { Destroy(); }
+        bool Create();
+        bool Draw(VIDEO_TYPE type, uint32 layout) const;
+        void Destroy() {
+            if (vao_) {
+                glDeleteVertexArrays(1, &vao_);
+            }
+            if (vbo_) {
+                glDeleteBuffers(1, &vbo_);
+            }
+            vao_ = vbo_ = 0;
+        }
+    } cube_;
 
     // HMD orientation
     mlabs::balai::math::Matrix3 hmd_xform_;
@@ -1266,6 +1606,11 @@ public:
         }
         return false;
     }
+    void AdjustAzimuthAngle(float angle) {
+        if (NULL!=current_track_) {
+            azimuth_adjust_ = fmod(azimuth_adjust_+angle, math::constants::float_two_pi);
+        }
+    }
 
 #ifndef HTC_VIVEPORT_RELEASE
     void ToggleAudioChange() {
@@ -1302,13 +1647,14 @@ public:
     void PlaySeek(int deltaTime=-10000) {
         if (NULL!=current_track_ && 0==on_processing_ ) {
             int const t = decoder_.VideoTime() + deltaTime;
-            decoder_.PlayAt(t>0 ? t:0);
+            // at least works for VS2012
+            std::async(std::launch::async, [this,t] { decoder_.PlayAt(t>0 ? t:0); });
         }
     }
     void PlayAtEnd(int remaintime=10000) {
         if (NULL!=current_track_ && 0==on_processing_) {
             int const t = decoder_.GetDuration() - remaintime;
-            decoder_.PlayAt(t>0 ? t:0);
+            std::async(std::launch::async, [this,t] { decoder_.PlayAt(t>0 ? t:0); });
         }
     }
     bool NextTrack(bool reset=false) {
@@ -1490,7 +1836,8 @@ public:
     void OnAudioInterrupt(int /*decoder_id*/, int lagtime, int pts) {
         int s = pts/1000;
         BL_LOG("On audio data starving at %d:%02d:%02d:%03d lag:%dms\n",
-               s/3600, (s%3600)/60, s%60, pts%1000, lagtime);
+                s/3600, (s%3600)/60, s%60, pts%1000, lagtime);
+
         if (0==on_processing_ && NULL!=current_track_ && current_track_->IsLiveStream() &&
             current_track_->IsTimeout(lagtime)) {
             BL_LOG("** %s lag for %dms, restarting video...\n", current_track_->GetName(), lagtime);
@@ -1622,7 +1969,11 @@ public:
     int  NumAvailableVideoDecoders() const { return decoder_.NumAvailableVideoDecoders(); }
     int  IsHardwareVideoDecoder() const { return decoder_.IsHardwareVideoDecoder(); }
     bool ToggleHardwareVideoDecoder() { return decoder_.ToggleHardwareVideoDecoder(); }
-    char const* VideoDecoderName() const { return decoder_.VideoDecoderName(); } 
+    char const* VideoDecoderName() const { return decoder_.VideoDecoderName(); }
+
+    //
+    // 0:FFmpeg SW, 1:GPU(AMF/NVDEC), 2+:FFmpeg + hw accel. 0xff:unknown   -2018.06.04
+    void SetPreferVideoDecoder(uint8 hwAccel) { return decoder_.SetPreferVideoDecoder(hwAccel); }
 
     //
     // the ugly!...
@@ -1636,57 +1987,60 @@ public:
     void ToggleSphericalVideoType() {
         if (NULL!=current_track_) {
             // const_cast... pardon me~
-            if (current_track_->IsSpherical()) {
-                int longi(0), lati_south(0), lati_north(0);
-                if (current_track_->GetSphericalAngles(longi, lati_south, lati_north) && 360==longi) {
-                    const_cast<VideoTrack*>(current_track_)->TweakVideoType(VIDEO_TYPE_SPHERICAL, 30); // 180
+            const_cast<VideoTrack*>(current_track_)->TweakVideoType();
+            dashboard_width_ = dashboard_height_*current_track_->AspectRatio();
+            //screen_width_ = screen_height_*track->AspectRatio();
+            widget_width_ = 0.925f*dashboard_width_; // 0.925f*screen_width_;
+            widget_left_  = -0.5f*widget_width_;
+        }
+    }
+    void ToggleCubemapType() {
+        if (NULL!=current_track_) {
+            const_cast<VideoTrack*>(current_track_)->TweakCubemap();
+        }
+    }
+    void ToggleStereoscopic3D() {
+        if (NULL!=current_track_) {
+            const_cast<VideoTrack*>(current_track_)->TweakStereoscopic3D();
+            dashboard_width_ = dashboard_height_*current_track_->AspectRatio();
+            //screen_width_ = screen_height_*track->AspectRatio();
+            widget_width_ = 0.925f*dashboard_width_; // 0.925f*screen_width_;
+            widget_left_  = -0.5f*widget_width_;
+        }
+    }
+    char const* VideoProjection() const {
+        if (NULL!=current_track_) {
+            int longi(0), lati_south(0), lati_north(0);
+            
+            if (current_track_->GetSphericalAngles(longi, lati_south, lati_north)) {
+                return (180==longi) ? "180":"360";
+            }
+            else if (current_track_->IsCube()) {
+                VIDEO_TYPE type = VIDEO_TYPE_2D;
+                uint32 layout = 0; 
+                current_track_->GetCubemapLayout(type, layout);
+                if (VIDEO_TYPE_EAC==(VIDEO_TYPE_CUBE&type)) {
+                    if (256==layout) {
+                        return "EAC (2x3 offcenter)";
+                    }
+                    else if (257==layout) {
+                        return "EAC (YouTube)";
+                    }
+                    else {
+                        return "EAC (Google RFC v2)";
+                    }
                 }
                 else {
-                    const_cast<VideoTrack*>(current_track_)->TweakVideoType(VIDEO_TYPE_2D, 0);
+                    if (256==layout) {
+                        return "Cubemap (2x3 offcenter)";
+                    }
+                    else if (257==layout) {
+                        return "Cubemap (YouTube)";
+                    }
+                    else {
+                        return "Cubemap (Google RFC v2)";
+                    }
                 }
-            }
-            else {
-               const_cast<VideoTrack*>(current_track_)->TweakVideoType(VIDEO_TYPE_SPHERICAL, 60);
-            }
-        }
-    }
-    void ToggleStereoScope() {
-        if (NULL!=current_track_) {
-            VIDEO_3D mode = current_track_->Stereoscopic3D();
-            if (VIDEO_3D_TOPBOTTOM==mode) {
-                mode = VIDEO_3D_LEFTRIGHT;
-            }
-            else if (VIDEO_3D_LEFTRIGHT==mode) {
-                mode = VIDEO_3D_MONO;
-            }
-            else if (VIDEO_3D_BOTTOMTOP==mode) {
-                mode = VIDEO_3D_MONO;
-            }
-            else if (VIDEO_3D_RIGHTLEFT==mode) {
-                mode = VIDEO_3D_MONO;
-            }
-            else { // mono
-                mode = VIDEO_3D_TOPBOTTOM;
-            }
-
-            // change aspect ratio if plane mode
-            if (const_cast<VideoTrack*>(current_track_)->TweakVideo3D(mode) &&
-                !current_track_->IsSpherical()) {
-                dashboard_width_ = dashboard_height_*current_track_->AspectRatio();
-                //screen_width_ = screen_height_*track->AspectRatio();
-                widget_width_ = 0.925f*dashboard_width_; // 0.925f*screen_width_;
-                widget_left_  = -0.5f*widget_width_;
-            }
-        }
-    }
-    char const* SphericalVideoType() const {
-        if (NULL!=current_track_) {
-            if (current_track_->IsSpherical()) {
-                int longi(0), lati_south(0), lati_north(0);
-                if (current_track_->GetSphericalAngles(longi, lati_south, lati_north) && 180==longi) {
-                    return "180";
-                }
-                return "360";
             }
             else {
                 return "Plane";

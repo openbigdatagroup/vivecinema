@@ -165,18 +165,17 @@ struct AudioDesc {
 
     // channel or track indices. indices after -1 are all unknown(place -1 to end the list)
     // 16 doesn't mean max channels are supported... when it stores channel indices,
-    // it probaly the fuma format it describe. since fuma format has max 16 channels,
+    // it probaly the fuma format it describe and since fuma format has max 16 channels,
     // we are fine. for HOA ambiX all channels are fixed. so 64 channels ambiX is possible.
     // and we will use Indices[16] to index tracks.
-    uint8           Indices[16];
+    //uint8           Indices[16];
 
     AudioDesc() { Reset(); }
     void Reset() {
         Technique = AUDIO_TECHNIQUE_DEFAULT;
         Format = AUDIO_FORMAT_UNKNOWN;
         SampleRate = NumChannels = NumTracks = 0;
-        memset(Indices, 0, sizeof(Indices));
-        Indices[0] = 0xff;
+        //memset(Indices, 0, sizeof(Indices)); Indices[0] = 0xff;
     }
 };
 

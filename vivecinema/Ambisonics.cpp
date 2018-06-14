@@ -59,13 +59,13 @@ namespace mlabs { namespace balai { namespace audio {
 
     #(channels) for spatial audio :
       4 : 1st order ambisonics(ambiX/FuMa)
-      6 : ambiX + stereo headlock, FuMa + stereo headlock
+      6 : 1st order ambisonics(ambiX/FuMa) + stereo headlock
       8 : TBE(2nd order ambisonics by merging Z+R channels)
-      9 : 2nd order ambisonics... really?
+      9 : 2nd order ambisonics(ambiX/FuMa)... really?
      10 : FB360(TBE+Stereo)
-     11 : 2nd order ambisonics + stereo headlock
+     11 : 2nd order ambisonics(ambiX/FuMa) + stereo headlock
      16 : 3rd order ambisonics(ambiX/FuMa)
-     18 : 2rd order ambisonics + stereo headlock
+     18 : 3rd order ambisonics(ambiX/FuMa) + stereo headlock
 
     special care must be taken when a channel data comes from LFE(sub-woofer). AAC tends
     to applie an aggressive low-pass filter and other techniques to compress the LFE channel.
@@ -162,9 +162,11 @@ struct TBERotationMatrix {
     float s31, s32, s33, s34, s35; // * | TBE[5] |
     float s41, s42, s43, s44, s45; //   | TBE[6] |
     float s51, s52, s53, s54, s55; //   | TBE[7] |
+
+#define PROF_ANGELO_REVISED_TBE_FORMULA
+#ifndef PROF_ANGELO_REVISED_TBE_FORMULA
     TBERotationMatrix(math::SphericalHarmonics::SHRotateMatrix const& shRot) {
         //
-        // http://pcfarina.eng.unipr.it/TBE-conversion.htm,
         // Big thanks to Prof. Angelo Farina's share, and below is only my best guess.
         // Not to mean Two Big Ears decodes their TBE the same way.
         //
@@ -270,7 +272,6 @@ struct TBERotationMatrix {
         s41 = m[17]*c2; s42 = -m[19]*d2; s43 = -m[15]*d2; s44 = -m[16]*d2; s45 = m[18]*d2;
         s51 = m[22]*c2, s52 = -m[24]*d2; s53 = -m[20]*d2; s54 = -m[21]*d2; s55 = m[23]*d2;
     }
-
     // input TBE 8 channels, output 2nd order ambiX 9 channels
     bool Transform(float* dst, int dst_stride, float const* tbe) const {
         float const tbe1(tbe[1]);
@@ -294,6 +295,91 @@ struct TBERotationMatrix {
 
         return true;
     }
+#else
+    // update version! Prof. Angelo TBE formula changed.
+    TBERotationMatrix(math::SphericalHarmonics::SHRotateMatrix const& shRot) {
+        //
+        //  TBE[0] =  0.488603 * Ambix[0] // W
+        //  TBE[1] = -0.488603 * Ambix[1] // Y
+        //  TBE[2] =  0.488603 * Ambix[3] // X
+        //  TBE[3] =  0.488603 * Ambix[2] // Z
+        //  TBE[4] = -0.630783 * Ambix[8] // U
+        //  TBE[5] = -0.630783 * Ambix[4] // V
+        //  TBE[6] = -0.630783 * Ambix[5] // T
+        //  TBE[7] =  0.630783 * Ambix[7] // S
+        //
+        // in matrix form(reversed)...
+        //
+        //  | W |   | a  0  0  0  0  0  0  0 |    | TBE[0] |
+        //  | Y |   | 0 -a  0  0  0  0  0  0 |    | TBE[1] |
+        //  | Z |   | 0  0  0  a  0  0  0  0 |    | TBE[2] |
+        //  | X |   | 0  0  a  0  0  0  0  0 |    | TBE[3] |
+        //  | V | = | 0  0  0  0  0 -b  0  0 | *  | TBE[4] |
+        //  | T |   | 0  0  0  0  0  0 -b  0 |    | TBE[5] |
+        //  | R |   | 0  0  0  0  0  0  0  0 |    | TBE[6] |
+        //  | S |   | 0  0  0  0  0  0  0  b |    | TBE[7] |8x1
+        //  | U |   | 0  0  0  0 -b  0  0  0 |9x8
+        //
+        float const a = 2.046651f; // 1.0f/0.488603f
+        float const b = 1.585331f; // 1.0f/0.630783f
+
+        // next, concatenate with Spherical Harmonics rotaion matrix
+        float m[25];
+
+        // W is easy
+        shRot.GetSubMatrix(m, 0); // 1x1
+        m00 = m[0]*a;
+
+        // Y, Z, X
+        //
+        // | m[0] m[1] m[2] |   | -a  0  0 |
+        // | m[3] m[4] m[5] | * |  0  0  a |
+        // | m[6] m[7] m[8] |   |  0  a  0 |
+        //
+        shRot.GetSubMatrix(m, 1); // 3x3
+        m11 = -m[0]*a; m12 = m[2]*a; m13 = m[1]*a;
+        m21 = -m[3]*a; m22 = m[5]*a; m23 = m[4]*a;
+        m31 = -m[6]*a; m32 = m[8]*a; m33 = m[7]*a;
+
+        // V, T, R, S, U
+        //
+        // |  m[0]  m[1]  m[2]  m[3]  m[4] |   | 0  0 -b  0  0 |
+        // |  m[5]  m[6]  m[7]  m[8]  m[9] |   | 0  0  0 -b  0 |
+        // | m[10] m[11] m[12] m[13] m[14] | * | 0  0  0  0  0 |
+        // | m[15] m[16] m[17] m[18] m[19] |   | 0  0  0  0  b |
+        // | m[20] m[21] m[22] m[23] m[24] |   | 0 -b  0  0  0 |
+        //
+        shRot.GetSubMatrix(m, 2); // 5x5
+        s11 = 0.0f; s12 =  -m[4]*b; s13 =  -m[0]*b; s14 =  -m[1]*b; s15 =  m[3]*b;
+        s21 = 0.0f; s22 =  -m[9]*b; s23 =  -m[5]*b; s24 =  -m[6]*b; s25 =  m[8]*b;
+        s31 = 0.0f; s32 = -m[14]*b; s33 = -m[10]*b; s34 = -m[11]*b; s35 = m[13]*b;
+        s41 = 0.0f; s42 = -m[19]*b; s43 = -m[15]*b; s44 = -m[16]*b; s45 = m[18]*b;
+        s51 = 0.0f, s52 = -m[24]*b; s53 = -m[20]*b; s54 = -m[21]*b; s55 = m[23]*b;
+    }
+    // input TBE 8 channels, output 2nd order ambiX 9 channels
+    bool Transform(float* dst, int dst_stride, float const* tbe) const {
+        *dst = m00*tbe[0]; dst+=dst_stride; // W
+
+        float const tbe1(tbe[1]);
+        float const tbe2(tbe[2]);
+        float const tbe3(tbe[3]);
+        *dst = m11*tbe1 + m12*tbe2 + m13*tbe3; dst+=dst_stride; // Y
+        *dst = m21*tbe1 + m22*tbe2 + m23*tbe3; dst+=dst_stride; // Z
+        *dst = m31*tbe1 + m32*tbe2 + m33*tbe3; dst+=dst_stride; // X
+
+        float const tbe4(tbe[4]);
+        float const tbe5(tbe[5]);
+        float const tbe6(tbe[6]);
+        float const tbe7(tbe[7]);
+        *dst = s12*tbe4 + s13*tbe5 + s14*tbe6 + s15*tbe7; dst+=dst_stride; // V
+        *dst = s22*tbe4 + s23*tbe5 + s24*tbe6 + s25*tbe7; dst+=dst_stride; // T
+        *dst = s32*tbe4 + s33*tbe5 + s34*tbe6 + s35*tbe7; dst+=dst_stride; // R - amazingly R is generated by SH rotation
+        *dst = s42*tbe4 + s43*tbe5 + s44*tbe6 + s45*tbe7; dst+=dst_stride; // S
+        *dst = s52*tbe4 + s53*tbe5 + s54*tbe6 + s55*tbe7; dst+=dst_stride; // U
+
+        return true;
+    }
+#endif
 };
 
 //---------------------------------------------------------------------------------------
@@ -528,6 +614,14 @@ bool AudioManager::DecodeAmbisonicHRTF_(void* output, AUDIO_FORMAT fmt,
             float* w = buffer_;
             for (int i=0; i<frames; ++i,++w,src+=desc.NumChannels) {
                 tbeRotate.Transform(w, frames, src);
+
+                //
+                // TO-DO : FB360 Encoder 'Focus' settings...
+                //         Focus size : 40 ~ 120 degrees (default=90.0)
+                //         Off-focus level : -24.0 ~ 0 dB (amplitude attenuation scale 10^(-1.2) ~ 1.0)
+                //
+                // The final solution should embeded in tbeRotate.Transform(w, frames, src);
+                //
             }
 
             //
@@ -661,7 +755,7 @@ bool AudioManager::DecodeAmbisonicHRTF_(void* output, AUDIO_FORMAT fmt,
 //
 //
 // below is the first version of ambisonics decoder with Vive Cinema 0.7.277(2016/12/16).
-// it's simple, fast, no HRTFs, no other resources, only without HRTF the result cannot
+// it's simple, fast, no HRTFs, no other resources, but without HRTF the result cannot
 // be too satisfied.
 //
 // Even though we should not use these functions any more, i'd like to keep these here

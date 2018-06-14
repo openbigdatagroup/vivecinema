@@ -126,7 +126,7 @@ inline cudaVideoCodec getCuvidCodec(AVCodecID id) {
 }
 
 // taken from cuvid samples VideoDecoder.cpp
-inline int cuvidGetNumSurfaces(cudaVideoCodec nvCodec, int width, int height)
+inline int cuvidGetNumDecodeSurfaces(cudaVideoCodec nvCodec, int width, int height)
 {
     if (cudaVideoCodec_H264==nvCodec || cudaVideoCodec_H264_SVC==nvCodec || cudaVideoCodec_H264_MVC==nvCodec) {
         return 20; // assume worst-case of 20 decode surfaces for H264
@@ -135,28 +135,46 @@ inline int cuvidGetNumSurfaces(cudaVideoCodec nvCodec, int width, int height)
         return 12;
     }
     else if (cudaVideoCodec_HEVC==nvCodec) { // ref HEVC spec: A.4.1 General tier and level limits
-        int const MaxLumaPS = 35651584; // currently assuming level 6.2, 8Kx4K
-        int const MaxDpbPicBuf = 6;
-        int const PicSizeInSamplesY = width * height;
-        int MaxDpbSize;
-        if (PicSizeInSamplesY <= (MaxLumaPS>>2)) {
-            MaxDpbSize = MaxDpbPicBuf*4;
-        }
-        else if (PicSizeInSamplesY <= (MaxLumaPS>>1)) {
-            MaxDpbSize = MaxDpbPicBuf*2;
-        }
-        else if (PicSizeInSamplesY <= ((3*MaxLumaPS)>>2)) {
-            MaxDpbSize = (MaxDpbPicBuf*4)/3;
-        }
-        else {
-            MaxDpbSize = MaxDpbPicBuf;
+        int const MaxLumaPictureSize = 35651584; // currently assuming level 6.2
+        int const LumaPictureSize = width*height;
+
+        //
+        // The MaxDpbSize, maximum number of pictures in the decoded picture buffer,
+        // for the maximum luma picture size of that level is 6 for all levels.
+        // The MaxDpbSize can increase to a maximum of 16 frames, if the luma picture size of the video
+        // is smaller than the maximum luma picture size of that level, in incremental steps of 4/3x, 2x, or 4x
+        int MaxDpbSize = 6;
+        if ((LumaPictureSize*4)<=(MaxLumaPictureSize*3)) {     // 5170 x 5170
+            if ((LumaPictureSize*2)<=MaxLumaPictureSize) {     // 4222 x 4222
+                if ((LumaPictureSize*4)<=MaxLumaPictureSize) { // 2984 x 2984
+                    //MaxDpbSize = MaxDpbSize*4;
+                    //if (MaxDpbSize>16) MaxDpbSize = 16;
+                    MaxDpbSize = 16; // min(4x, 16)
+                }
+                else {
+                    MaxDpbSize = 12; // 2x
+                }
+            }
+            else {
+                MaxDpbSize = 8; // 4/3x
+            }
         }
 
-        return (MaxDpbSize<16) ? (MaxDpbSize+4):20;
+        // 8Kx8K => 10
+        // 6Kx6K => 10
+        // 4Kx4K => 16
+        // 3840x2160 => 20
+        // 2Kx2K => 20
+        return MaxDpbSize+4;
     }
 
     return 8;
 }
+
+//
+// CUVIDDECODECREATEINFO::ulNumOutputSurfaces
+// FFmpeg set this as 1(ffmpeg/libavcodec/cuvid.c) while all cuvid samples set as 2
+#define CUVID_NUM_OUTPUT_SURFACES 2
 
 //
 // GPU context for NVDEC and AMD AMF
@@ -168,13 +186,16 @@ struct GPUContext
     } cuvidCaps8[cudaVideoCodec_NumCodecs], 
     cuvidCaps10[cudaVideoCodec_NumCodecs],
     cuvidCaps12[cudaVideoCodec_NumCodecs];
+    char             cudaDeviceInfo[256];
     std::mutex       mutex;
     CUcontext        cudaContext;
     amf::AMFContext* amfContext;
     int              activeDecoders;
     int              init;
 
-    GPUContext():mutex(),cudaContext(NULL),amfContext(NULL),activeDecoders(0),init(0) {}
+    GPUContext():mutex(),cudaContext(NULL),amfContext(NULL),activeDecoders(0),init(0) {
+        memset(cudaDeviceInfo, 0, sizeof(cudaDeviceInfo));
+    }
     ~GPUContext() {
         std::lock_guard<std::mutex> lock(mutex);
         assert(NULL==cudaContext);
@@ -529,7 +550,7 @@ public:
 // nVidia cuvid decoder. reference ffmpeg/libavcodec/cuvid.c
 class CUVIDDecoder : public VideoDecoderImp
 {
-    enum { MAX_CUVID_PARSED_FRAMES = 32 };
+    enum { MAX_CUVID_PARSED_FRAMES = 20 };
     CUVIDPARSERDISPINFO cuvidParsedFrames_[MAX_CUVID_PARSED_FRAMES];
     mutable std::mutex  mutex_;
     CUVIDEOFORMATEX     cuvidFmt_;
@@ -541,9 +562,8 @@ class CUVIDDecoder : public VideoDecoderImp
     // working memory scratchpad
     CUdeviceptr         cuPtr_;     // cuda devide ptr for CUDA/OpenGL interop
     int                 cuPtrSize_;
-
-    int                 numSurfaces_;
     int                 width_, height_;
+    int                 numDecodeSurfaces_;
     int                 framePut_, frameGet_;
     int                 cuFramePut_, cuFrameGet_;
 
@@ -593,7 +613,7 @@ class CUVIDDecoder : public VideoDecoderImp
         memset(&dci, 0, sizeof(CUVIDDECODECREATEINFO));
         dci.ulWidth             = fmt->coded_width;
         dci.ulHeight            = fmt->coded_height;
-        dci.ulNumDecodeSurfaces = numSurfaces_;
+        dci.ulNumDecodeSurfaces = numDecodeSurfaces_;
         dci.CodecType           = fmt->codec;
         dci.ChromaFormat        = fmt->chroma_format;
 
@@ -631,7 +651,7 @@ class CUVIDDecoder : public VideoDecoderImp
         assert(0==(1&width_) && 0==(1&height_));
         dci.ulTargetWidth       = width_;
         dci.ulTargetHeight      = height_;
-        dci.ulNumOutputSurfaces = 1; // ffmpeg/libavcodec/cuvid.c
+        dci.ulNumOutputSurfaces = CUVID_NUM_OUTPUT_SURFACES;
 
         // context lock used for synchronizing ownership of the cuda context.
         // needed for cudaVideoCreate_PreferCUDA decode???
@@ -668,7 +688,7 @@ class CUVIDDecoder : public VideoDecoderImp
         for (int i=0; i<500; ++i) {
             // send_packet() already lock the mutex_. Don't do it here!!!
             //std::lock_guard<std::mutex> lock(mutex_);
-            if (framePut_<(frameGet_+numSurfaces_)) {
+            if (framePut_<(frameGet_+MAX_CUVID_PARSED_FRAMES)) {
                 cuvidParsedFrames_[(framePut_++)%MAX_CUVID_PARSED_FRAMES] = *dinfo;
                 return true;
             }
@@ -679,7 +699,7 @@ class CUVIDDecoder : public VideoDecoderImp
 
         // wait too long, discard most outdated frames
         cuvidParsedFrames_[(framePut_++)%MAX_CUVID_PARSED_FRAMES] = *dinfo;
-        frameGet_ = framePut_ - numSurfaces_;
+        frameGet_ = framePut_ - MAX_CUVID_PARSED_FRAMES;
         return true; // return false will terminate video decoding
     }
 
@@ -690,7 +710,7 @@ public:
     CUVIDDecoder(AVCodecID codec):VideoDecoderImp(codec),
         mutex_(),cuvidDecoder_(NULL),cuvidParser_(NULL),cuCtx_(NULL),bsfCtx_(NULL),
         cuPtr_(NULL),cuPtrSize_(0),
-        numSurfaces_(0),width_(0),height_(0),framePut_(0),frameGet_(0),cuFramePut_(0),cuFrameGet_(0) {
+        width_(0),height_(0),numDecodeSurfaces_(0),framePut_(0),frameGet_(0),cuFramePut_(0),cuFrameGet_(0) {
         memset(&cuvidParsedFrames_, 0, sizeof(cuvidParsedFrames_));
         memset(&cuvidFmt_, 0, sizeof(cuvidFmt_));
     }
@@ -721,12 +741,12 @@ public:
 
         memset(&cuvidParsedFrames_, 0, sizeof(cuvidParsedFrames_));
         memset(&cuvidFmt_, 0, sizeof(cuvidFmt_));
-        numSurfaces_ = width_ = height_ = 0;
-        framePut_ = frameGet_ = cuFramePut_ = cuFrameGet_ = 0;
+        width_ = height_ = 0;
+        numDecodeSurfaces_ = framePut_ = frameGet_ = cuFramePut_ = cuFrameGet_ = 0;
     }
 
     // identity
-    char const* Name() const { return "NVDEC (GPU)"; }
+    char const* Name() const { return gpuCtx.cudaDeviceInfo; } //"NVDEC (GPU)"; }
 
     bool Init(CUcontext cuCtx, AVStream const* stream, int width, int height) {
         assert(NULL==cuCtx_ && stream && stream->codecpar && stream->codecpar->codec_id==CodecID());
@@ -802,14 +822,12 @@ public:
             int const coded_width  = avctx->coded_width;
             int const coded_height = avctx->coded_height;
 
-            // #(surfaces)
-            numSurfaces_ = cuvidGetNumSurfaces(codecType, coded_width, coded_height);
-            if (numSurfaces_>MAX_CUVID_PARSED_FRAMES)
-                numSurfaces_ = MAX_CUVID_PARSED_FRAMES;
-
             // target size
             width_ = width;
             height_ = height;
+
+            // # of internal decode surfaces
+            numDecodeSurfaces_ = cuvidGetNumDecodeSurfaces(codecType, coded_width, coded_height);
 
             // build format
             CUVIDEOFORMAT fmt;
@@ -866,7 +884,7 @@ public:
                 CUVIDPARSERPARAMS pps;
                 memset(&pps, 0, sizeof(pps));
                 pps.CodecType              = codecType;
-                pps.ulMaxNumDecodeSurfaces = numSurfaces_;
+                pps.ulMaxNumDecodeSurfaces = numDecodeSurfaces_;
 
                 // Timestamp units in Hz (0=default=10000000Hz) 
                 //pps.ulClockRate         = 0;
@@ -973,7 +991,7 @@ public:
                 CUVIDPARSERPARAMS pps;
                 memset(&pps, 0, sizeof(pps));
                 pps.CodecType              = cuvidFmt_.format.codec;
-                pps.ulMaxNumDecodeSurfaces = numSurfaces_;
+                pps.ulMaxNumDecodeSurfaces = numDecodeSurfaces_;
 
                 // Timestamp units in Hz (0=default=10000000Hz) 
                 //pps.ulClockRate         = 0;
@@ -1023,7 +1041,8 @@ public:
     }
     bool can_send_packet() {
         std::lock_guard<std::mutex> lock(mutex_);
-        return framePut_<(frameGet_+numSurfaces_) && framePut_<(frameGet_+4);
+        //return framePut_==frameGet_;
+        return framePut_<(frameGet_+MAX_CUVID_PARSED_FRAMES) && framePut_<(frameGet_+4);
     }
     bool can_receive_frame(int64_t& pts, int64_t& dur) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -1142,8 +1161,12 @@ public:
                 mc2d.WidthInBytes = width_;
                 mc2d.Height       = scan_lines;
 
-                if ((CUDA_SUCCESS==cuMemcpy2D(&mc2d)) &&
-                    (CUDA_SUCCESS==cuvidUnmapVideoFrame(cuvidDecoder_, cuDevPtr))) {
+                err = cuMemcpy2D(&mc2d);
+
+                // unmap
+                cuvidUnmapVideoFrame(cuvidDecoder_, cuDevPtr);
+
+                if (CUDA_SUCCESS==err) {
                     //
                     // to decide frame.ColorSpace and frame.ColorRange, check -
                     //  cuvidFmt_.format.video_signal_description.color_primaries = (unsigned char) codecpar->color_primaries;
@@ -1155,9 +1178,8 @@ public:
                     return true;
                 }
             }
-            else {
-                BL_LOG("** cuvidMapVideoFrame() failed(%d)\n", err);
-            }
+
+            BL_LOG("** cuvidMapVideoFrame() failed(%d)\n", err);
         }
         return false;
     }
@@ -1372,14 +1394,23 @@ int InitContext(void* /*device*/)
                 CUDA_SUCCESS==cuCtxCreate(&gpuCtx.cudaContext, CU_CTX_SCHED_BLOCKING_SYNC, cuda_device) && gpuCtx.cudaContext) {
 #endif
 
-#ifdef BL_AVDECODER_VERBOSE
                 char cuda_device_name[256];
                 int driver_ver(0), major(0), minor(0);
-                cuDeviceGetName(cuda_device_name, sizeof(cuda_device_name), cuda_device);
                 cuDeviceComputeCapability(&major, &minor, cuda_device);
                 cuDriverGetVersion(&driver_ver);
-                BL_LOG("** Hardware info(#%d) : nVidia CUVID | %s | ver.%d.%d | driver:%d\n",
-                       best_device_index, cuda_device_name, major, minor, driver_ver);
+
+                cuDeviceGetName(cuda_device_name, sizeof(cuda_device_name), cuda_device);
+                if (cuda_device_count>1) {
+                    sprintf(gpuCtx.cudaDeviceInfo, "%s(#%d)", cuda_device_name, best_device_index+1);
+                }
+                else {
+                    strncpy(gpuCtx.cudaDeviceInfo, cuda_device_name, sizeof(gpuCtx.cudaDeviceInfo));
+                }
+                gpuCtx.cudaDeviceInfo[sizeof(gpuCtx.cudaDeviceInfo)-1] = '\0';
+
+#ifdef BL_AVDECODER_VERBOSE
+                BL_LOG("** Hardware Decoder : %s | ver.%d.%d | driver:%d\n",
+                       gpuCtx.cudaDeviceInfo, major, minor, driver_ver);
                 char const* codec[cudaVideoCodec_NumCodecs] = {
                     "MPEG1   ", "MPEG2   ", "MPEG4   ", "VC1     ", "H264    ",
                     "JPEG    ", "H264-SVC", "H264-MVC", "HEVC    ", "VP8     ",
@@ -1420,7 +1451,7 @@ int InitContext(void* /*device*/)
                             // it makes us to create CUvideodecoder here!
                             dci.ulWidth             = cap.nMaxWidth;
                             dci.ulHeight            = cap.nMaxHeight;
-                            dci.ulNumDecodeSurfaces = cuvidGetNumSurfaces(cap.eCodecType, cap.nMaxWidth, cap.nMaxHeight);
+                            dci.ulNumDecodeSurfaces = cuvidGetNumDecodeSurfaces(cap.eCodecType, cap.nMaxWidth, cap.nMaxHeight);
                             dci.CodecType           = cap.eCodecType;
                             dci.ChromaFormat        = cap.eChromaFormat; // cudaVideoChromaFormat_420
                             dci.ulCreationFlags     = cudaVideoCreate_PreferCUVID;
@@ -1439,7 +1470,7 @@ int InitContext(void* /*device*/)
                             dci.DeinterlaceMode     = cudaVideoDeinterlaceMode_Weave; // no deinterlacing
                             dci.ulTargetWidth       = cap.nMaxWidth;
                             dci.ulTargetHeight      = cap.nMaxHeight;
-                            dci.ulNumOutputSurfaces = 1;
+                            dci.ulNumOutputSurfaces = CUVID_NUM_OUTPUT_SURFACES;
                             dci.vidLock             = NULL;
                             dci.target_rect.left    = dci.target_rect.top = 0;
                             dci.target_rect.right   = (short) cap.nMaxWidth;
@@ -1526,7 +1557,7 @@ int GPUAccelScore()
     }
 
     if (gpuCtx.amfContext) {
-        return 1;
+        return 1; // are you OK now, AMF?
     }
 
     return 0;

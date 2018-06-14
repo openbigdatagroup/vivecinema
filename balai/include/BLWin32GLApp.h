@@ -146,10 +146,9 @@ protected:
     uint8  depthBits_;
     uint8  stencilBits_;
     uint8  vsync_on_;
-    //uint8  fullscreen_;
+    uint8  fullscreen_;
     uint8  gl_major_version_;
     uint8  gl_minor_version_;
-    uint8  gl_debug_on_; // GL 4.3+
 
     // grant access to derived classes only
     Win32GLApp();

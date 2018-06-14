@@ -40,13 +40,6 @@
 
 #include "VRVideoPlayer.h"
 
-BL_CSTD_MEMMGR_IMPLMENTATION(64<<20, 1<<20);
-
-using namespace mlabs::balai::graphics;
-using namespace mlabs::balai::math;
-
-namespace mlabs { namespace balai { namespace framework {
-
 /*
  * versions -
  *   2016.03.15 ver 0.0.001 - Day1
@@ -87,8 +80,8 @@ namespace mlabs { namespace balai { namespace framework {
  *   2017.07.07 ver 0.9.480 - migrate to FFmpeg 3.3.2
  *   2017.07.27 ver 0.9.500 - 5.1/7.1 audio HRTF
  *   2017.07.28 ver 0.9.501 - (10th submit)
- *   2017.08.15 ver 0.9.501+ - (11th submit) rollback openvr sdk!
- *   2017.08.28 ver 0.9.531 - modify Rec.709 color conversion (no gamma correction) for Deserted @ Venice
+ *   2017.08.15 ver 0.9.501* - (11th submit) rollback openvr sdk!
+ *   2017.08.28 ver 0.9.531 - modify Rec.709 color conversion (no gamma correction) for The Deserted @ Venice
  *   2017.09.12 ver 0.9.546 - Hardware accelerated video decoder, AMD AMF and NVIDIA CUVID integration
  *   2017.09.25 ver 0.9.559 - a build for Kaohsiung Film Festival
  *   2017.09.27 ver 0.9.561 - loop(repeat) version (for Golden Bell Awards event)
@@ -100,16 +93,26 @@ namespace mlabs { namespace balai { namespace framework {
  *   2017.12.25 ver 0.9.649 - fix texture failed to update with CUDA/OpenGL interoperability
  *   2018.01.11 ver 0.9.666 - UI/minor fixes, Spherical Video V2 RFC(mp4 only)
  *   2018.03.28 ver 0.9.742 - Hong Kong International Film Festival, The Deserted VR Screening.
+ *   2018.06.06 ver 1.0.812 - Fullscreen mode, app config xml.
+ *   2018.06.07 ver 1.0.813 - use Prof. Angelo's revised TBE/AmbiX conversion formula.
+ *   2018.06.08 ver 1.0.814 - Cubemap/EAC projection with layout 3x2, 2x3 offcenter & YouTube.
+ *   2018.06.15 ver 1.0.821 - Tweak CUVID parameters... last day @ HTC. so long...
  */
-char const* const buildNo = "Vive Cinema Build 0.9.742";
+char const* const buildNo = "Vive Cinema Build 1.0.821";
 
-#define DRAW_SINGLE_VIEW
-#ifdef DRAW_SINGLE_VIEW
-// reference width x height = 1512x1680
-#define DRAW_SINGLE_VIEW_WIDTH 1440
-//#define DRAW_SINGLE_VIEW_HEIGHT 900
-#endif
+BL_CSTD_MEMMGR_IMPLMENTATION(64<<20, 1<<20);
 
+using namespace mlabs::balai::graphics;
+using namespace mlabs::balai::math;
+using namespace mlabs::balai::framework;
+
+//
+// reference width x height = 1512x1680 (Vive)
+//#define DRAW_DUAL_VIEWS
+#define DEFAULT_WINDOW_WIDTH 1512
+
+//
+// time metrices
 #ifdef OPTIMIZING_SHOW_FRAME_TIMIING
 int const FRAME_TIMING_LOG_FRAMES = 180;
 static int cur_log_frame = 0;
@@ -177,9 +180,15 @@ void DrawCurve(Primitives& prim, float x0, float /*y0*/, float x1, float y1,
 }
 #endif
 
-class MyApp : public BaseApp
+// [the ugly] define somewhere
+bool ReadAppConfig(wchar_t const* xml, 
+                   wchar_t* host_path, int max_path_len,
+                   int& winwidth, int& winheight, bool& fullscreen,
+                   int& preferDecoder);
+
+class MyApp : mlabs::balai::framework::BaseApp
 {
-    WCHAR          videoPath_[MAX_PATH];
+    wchar_t        videoPath_[MAX_PATH];
     htc::VRVideoPlayer player_;
     VR::Manager&   vrMgr_;
     IAsciiFont*    font_;
@@ -234,6 +243,47 @@ class MyApp : public BaseApp
         free(pixels);
     }
 
+    bool BuildStereoRenderSurfaces_(uint8 samples) {
+        int width(0), height(0);
+        if (!vrMgr_.GetRenderSurfaceSize(width, height)) {
+#ifdef BL_DEBUG_BUILD
+            width = 1512; // i guess
+            height = 1680;
+#else
+            ::MessageBoxA(NULL, "Sorry...\nOpenVR system isn't ready, App must quit.", window_title_, MB_OK);
+            return false;
+#endif
+        }
+
+        SurfaceGenerator sgen;
+        sgen.SetRenderTargetFormat(SURFACE_FORMAT_RGBA8);
+        sgen.SetDepthFormat(SURFACE_FORMAT_D24);
+
+        sgen.SetSurfaceSize(width, height);
+        sgen.SetMultiSampleSamples(samples);
+
+        BL_SAFE_RELEASE(surfaceL_);
+        BL_SAFE_RELEASE(surfaceR_);
+
+        surfaceL_ = sgen.Generate("Left View");
+        surfaceR_ = sgen.Generate("Right View");
+        return true;
+    }
+
+    bool DrawScene_(VR::HMD_EYE eye) {
+        bool ok = false;
+        Renderer& renderer = Renderer::GetInstance();
+        renderer.SetSurface((VR::HMD_EYE_LEFT==eye) ? surfaceL_:surfaceR_);
+        renderer.Clear(Color::Gray);
+        if (renderer.BeginScene()) {
+            renderer.SetViewMatrix(vrMgr_.GetViewMatrix(eye));
+            renderer.SetProjectionMatrix(vrMgr_.GetProjectionMatrix(eye));
+            ok = player_.Render(eye);
+            renderer.EndScene();
+        }
+        return ok;
+    }
+
 public:
     MyApp():vrMgr_(VR::Manager::GetInstance()),
         player_(),
@@ -269,53 +319,77 @@ public:
             }
         }
 #endif
-        window_title_ = "Vive Cinema";
+        // invalid video path
+        memset(videoPath_, 0, sizeof(videoPath_));
 
-        int width(0), height(0);
-        if (vrMgr_.GetRenderSurfaceSize(width, height)) {
-#ifdef DRAW_SINGLE_VIEW
- #ifdef DRAW_SINGLE_VIEW_WIDTH
-            width_  = (uint16) DRAW_SINGLE_VIEW_WIDTH;
-  #ifdef DRAW_SINGLE_VIEW_HEIGHT
-            height_ = (uint16) DRAW_SINGLE_VIEW_HEIGHT;
-  #else
-            height_ = (uint16) (width_*9/16);
-  #endif
- #else
-            width_  = (uint16) width;
-            height_ = (uint16) (width_*9/16);
- #endif
-#else
-            width_  = (uint16) width;
-            height_ = (uint16) height/2;
+        BaseApp::window_title_ = "Vive Cinema";
+        BaseApp::vsync_on_   = 0; // do NOT waste anytime on main window vsync.
+        BaseApp::fullscreen_ = 0; // TBD
+
+        // decide windows size
+        int const max_width = GetSystemMetrics(SM_CXSCREEN);
+        int const max_height = GetSystemMetrics(SM_CYSCREEN);
+        int width  = DEFAULT_WINDOW_WIDTH;
+        int height = DEFAULT_WINDOW_WIDTH*9/16;
+
+#ifndef DRAW_DUAL_VIEWS
+        int ConfigWidth  = width;
+        int ConfigHeight = height;
+        bool IsFullscreen = false;
+        int PreferDecoder = 0;
+        if (ReadAppConfig(L"./config.xml",
+                          videoPath_, sizeof(videoPath_)/sizeof(videoPath_[0]),
+                          ConfigWidth, ConfigHeight, IsFullscreen, PreferDecoder)) {
+#ifndef BL_DEBUG_BUILD
+            if (IsFullscreen) {
+                BaseApp::fullscreen_ = 1; // fullscreen mode is not good for debugging
+            }
 #endif
-            // cannot fit!?
-            int const max_width = GetSystemMetrics(SM_CXSCREEN);
-            int const max_height = GetSystemMetrics(SM_CYSCREEN);
-            if (0<max_width && 0<max_height &&
-                (10*width_>9*max_width || 10*height_>9*max_height)) {
-                // keep aspect ratio
-                int const max_height2 = max_width*height_/width_;
-                if (max_height2>max_height) {
-                    height = max_height*90/100;
-                    width_ = (uint16) (height*width_/height_);
-                    height_ = (uint16) height;
-                }
-                else {
-                    width = (uint16) max_width*90/100;
-                    height_ = (uint16) width*height_/width_;
-                    width_ = (uint16) width;
-                }
+            if (0!=BaseApp::fullscreen_ && 800<max_width && 600<max_height) {
+                width  = max_width;
+                height = max_height;
+            }
+            else if (ConfigWidth>0 && ConfigHeight>0) {
+                width  = ConfigWidth;
+                height = ConfigHeight;
             }
 
-            vsync_on_ = 0; // do NOT waste anytime on main window vsync.
+            if (1==PreferDecoder) {
+                player_.SetPreferVideoDecoder(1);
+            }
+            else if (-1==PreferDecoder) {
+                player_.SetPreferVideoDecoder(0);
+            }
+        }
+#else
+        // it needs to set client window's aspect ratio as close to HMDs,
+        // since it don't crop when present.
+        if (vrMgr_.GetRenderSurfaceSize(width, height)) {
+            height = (uint16) height/2;
         }
         else {
-            ::MessageBoxA(NULL, "Sorry...\nOpenVR system isn't ready, App must quit.", window_title_, MB_OK);
+            width  = 1512; // i guess
+            height = 1680/2;
+        }
+#endif
+        // cannot fit?
+        if (0==BaseApp::fullscreen_) {
+            if (800<max_width && 600<max_height) {
+                // keep aspect ratio
+                if (width>max_width) {
+                    height = max_width*height/width;
+                    width  = max_width;
+                }
+
+                if (height>max_height) {
+                    width  = max_height*width/height; 
+                    height = max_height;
+                }
+            }
         }
 
-        // invalid video path
-        videoPath_[0] = L'\0';
+        BaseApp::width_  = (uint16) width;
+        BaseApp::height_ = (uint16) height;
     }
     void ParseCommandLine(int argc, char* argv[]) {
         if (argc>1) {
@@ -344,37 +418,12 @@ public:
             }
         }
     }
-    bool BuildStereoRenderSurfaces(uint8 samples) {
-        int width(0), height(0);
-        if (!vrMgr_.GetRenderSurfaceSize(width, height)) {
-#ifdef BL_DEBUG_BUILD
-            width = 1512; // i guess
-            height = 1680;
-#else
-            return false;
-#endif
-        }
-
-        SurfaceGenerator sgen;
-        sgen.SetRenderTargetFormat(SURFACE_FORMAT_RGBA8);
-        sgen.SetDepthFormat(SURFACE_FORMAT_D24);
-
-        sgen.SetSurfaceSize(width, height);
-        sgen.SetMultiSampleSamples(samples);
-
-        BL_SAFE_RELEASE(surfaceL_);
-        BL_SAFE_RELEASE(surfaceR_);
-
-        surfaceL_ = sgen.Generate("Left View");
-        surfaceR_ = sgen.Generate("Right View");
-        return true;
-    }
 
     bool Initialize() {
         msaa_enable_ = 1;
         multisampleSamples_ = (uint8) Renderer::GetInstance().GetMaxMultisampleSamples();
         if (multisampleSamples_>8) multisampleSamples_ = 8;
-        if (!BuildStereoRenderSurfaces(multisampleSamples_)) {
+        if (!BuildStereoRenderSurfaces_(multisampleSamples_)) {
             return false;
         }
 
@@ -388,62 +437,80 @@ public:
 
         // init video player
         if (player_.Initialize()) {
-            WCHAR const* auxPath = L"D:/Vive Cinema";
-            WCHAR targetPath[MAX_PATH];
-            if (videoPath_[0]==L'\0') {
-                htc::Win32KnownFolderPath dir;
-                WCHAR const* path = dir.GetPath(htc::KNOWN_PATH_VIDEOS);
-                if (NULL!=path)  {
-                    swprintf(targetPath, MAX_PATH, L"%s\\Vive Cinema", path);
+            wchar_t targetPath[MAX_PATH];
+            if (videoPath_[0]==L'\0' ||
+                0==memcmp(videoPath_, L"$(My Videos)", 12*sizeof(videoPath_[0]))) {
+                htc::Win32KnownFolderPath user_video_path;
+                WCHAR const* video_path = user_video_path.GetPath(htc::KNOWN_PATH_VIDEOS);
+                if (NULL!=video_path) {
+                    if (videoPath_[0]!=L'\0') {
+                        swprintf(targetPath, MAX_PATH, L"%s\\%s", video_path, videoPath_+12);
+                    }
+                    else {
+                        swprintf(targetPath, MAX_PATH, L"%s\\Vive Cinema", video_path);
+                    }
                 }
-                else { // if cannot locate Library/video...
-                    wcscpy_s(targetPath, MAX_PATH, auxPath);
+                else {
+                    wcscpy_s(targetPath, MAX_PATH, L"./assets");
                 }
             }
             else {
-                wcscpy_s(targetPath, videoPath_);
+                wcscpy_s(targetPath, MAX_PATH, videoPath_);
             }
 
-            //
-            // GetFileAttributes() may fail for other reasons than lack of existence 
-            // (for example permissions issues). I would add a check on the error code for robustness
-            DWORD const mainPathAttrib = GetFileAttributes(targetPath);
-            int path_exist = (mainPathAttrib!=INVALID_FILE_ATTRIBUTES) &&
-                              (GetLastError()!=ERROR_FILE_NOT_FOUND) &&
-                              (0!=(mainPathAttrib&FILE_ATTRIBUTE_DIRECTORY));
-            if (!path_exist) {
-                if (CreateDirectory(targetPath, NULL)) {
-                    path_exist = 2; // new created
-                }
+            int path_created = 0;
+            wchar_t* dst = videoPath_;
+            *dst = targetPath[0];
+            for (int i=1; i<MAX_PATH; ++i) {
+                wchar_t const& c = targetPath[i];
+                if (c!=L'\0') {
+                    if (c=='/'||c=='\\') {
+                        if (L'/'!=*dst) {
+                            *++dst = L'\0';
 
-                // only create for the 1st time... prevent repeatly creating
-                // this directory after users delete it.
-                DWORD const auxPathAttrib = GetFileAttributes(auxPath);
-                int auxPath_exist = (auxPathAttrib!=INVALID_FILE_ATTRIBUTES) &&
-                                    (GetLastError()!=ERROR_FILE_NOT_FOUND) &&
-                                    (0!=(auxPathAttrib&FILE_ATTRIBUTE_DIRECTORY));
-                if (!auxPath_exist && CreateDirectory(auxPath, NULL)) {
-                    auxPath_exist = 2;
-                }
+                            if (CreateDirectoryW(videoPath_, NULL)) {
+                                path_created = 1;
+                            }
+                            else if (ERROR_ALREADY_EXISTS!=GetLastError()) {
+                                path_created = -1;
+                                break;
+                            }
 
-                if (!path_exist && auxPath_exist) {
-                    wcscpy_s(targetPath, auxPath);
-                    path_exist = 3;
+                            *dst = L'/';
+                        }
+                    }
+                    else {
+                        *++dst = c;
+                    }
+                }
+                else {
+                    if (L'/'!=*dst) {
+                        *++dst = L'\0';
+                        if (CreateDirectoryW(videoPath_, NULL)) {
+                            path_created = 1;
+                        }
+                        else if (ERROR_ALREADY_EXISTS!=GetLastError()) {
+                            path_created = -1;
+                        }
+                    }
+                    else {
+                        *dst = L'\0';
+                    }
+                    break;
                 }
             }
 
-            if (path_exist) {
+            if (0<=path_created) {
                 // vivecinema.xml -- don't not overwrite user's own copy!
-                WCHAR wfilename[256];
-                swprintf(wfilename, 256, L"%s/%s", targetPath, L"vivecinema.xml");
-                DWORD const ret = GetFileAttributesW(wfilename);
+                swprintf(targetPath, 256, L"%s/%s", videoPath_, L"vivecinema.xml");
+                DWORD const ret = GetFileAttributesW(targetPath);
                 if (INVALID_FILE_ATTRIBUTES==ret || ERROR_FILE_NOT_FOUND==GetLastError()) {
-                    CopyFileW(L"./assets/vivecinema.xml", wfilename, TRUE); // fail if exists
+                    CopyFileW(L"./assets/vivecinema.xml", targetPath, TRUE);
                 }
 
 #ifdef HTC_VIVEPORT_RELEASE
-                if (2==path_exist||3==path_exist) {
-                    // if we can create this directory, copy embeded videos now.
+                // if we can create this directory(for the first time), copy accompany videos.
+                if (1==path_created) {
                     WIN32_FIND_DATAW fd;
                     HANDLE hFind = FindFirstFileW(L"./assets/*.*", &fd);
                     if (INVALID_HANDLE_VALUE!=hFind) {
@@ -461,18 +528,18 @@ public:
                                             0==memcmp(ext, L"mkv", 3*sizeof(wchar_t)) || 0==memcmp(ext, L"MKV", 3*sizeof(wchar_t)) ||
                                             0==memcmp(ext, L"srt", 3*sizeof(wchar_t)) || 0==memcmp(ext, L"SRT", 3*sizeof(wchar_t)) ||
                                             0==memcmp(ext, L"ass", 3*sizeof(wchar_t)) || 0==memcmp(ext, L"ASS", 3*sizeof(wchar_t))) {
-                                            full_len = swprintf(wfilename, 256, L"./assets/%s", fd.cFileName);
+                                            full_len = swprintf(targetPath, 256, L"./assets/%s", fd.cFileName);
                                         }
                                     }
                                     else if (short_len>5 && ext[-1]==L'.') {
                                         if (0==memcmp(ext, L"divx", 4*sizeof(wchar_t))) {
-                                            full_len = swprintf(wfilename, 256, L"./assets/%s", fd.cFileName);
+                                            full_len = swprintf(targetPath, 256, L"./assets/%s", fd.cFileName);
                                         }
                                     }
 
                                     if (full_len>=14) {
-                                        swprintf(wNewFilename, 256, L"%s/%s", targetPath, fd.cFileName);
-                                        CopyFile(wfilename, wNewFilename, TRUE); // fail if exists
+                                        swprintf(wNewFilename, 256, L"%s/%s", videoPath_, fd.cFileName);
+                                        CopyFile(targetPath, wNewFilename, TRUE); // fail if exists
                                     }
                                 }
                             }
@@ -483,8 +550,12 @@ public:
                 }
 #endif
             }
+            else {
+                wcscpy_s(videoPath_, MAX_PATH, L"./assets");
+            }
 
-            player_.SetMediaPath(targetPath);
+            // import videos
+            player_.SetMediaPath(videoPath_);
 
 #ifdef BL_DEBUG_BUILD
             blDumpMemory();
@@ -497,23 +568,11 @@ public:
     bool FrameMove(float /*updateTime*/) {
         if (msaa_enable_>1) {
             msaa_enable_ &= 1;
-            BuildStereoRenderSurfaces(msaa_enable_ ? multisampleSamples_:0);
+            BuildStereoRenderSurfaces_(msaa_enable_ ? multisampleSamples_:0);
         }
         return true;
     }
-    bool DrawScene(VR::HMD_EYE eye) {
-        bool ok = false;
-        Renderer& renderer = Renderer::GetInstance();
-        renderer.SetSurface((VR::HMD_EYE_LEFT==eye) ? surfaceL_:surfaceR_);
-        renderer.Clear(Color::Gray);
-        if (renderer.BeginScene()) {
-            renderer.SetViewMatrix(vrMgr_.GetViewMatrix(eye));
-            renderer.SetProjectionMatrix(vrMgr_.GetProjectionMatrix(eye));
-            ok = player_.Render(eye);
-            renderer.EndScene();
-        }
-        return ok;
-    }
+
 #ifdef OPTIMIZING_SHOW_FRAME_TIMIING
     bool Render_FrameTiming() {
         memset(baseline, 0, sizeof(baseline));
@@ -561,7 +620,7 @@ public:
 
         // 2) draw next frames to be presented in the next loop
         t0 = system::GetTime();
-        bool const ret = DrawScene(VR::HMD_EYE_LEFT) && DrawScene(VR::HMD_EYE_RIGHT);
+        bool const ret = DrawScene_(VR::HMD_EYE_LEFT) && DrawScene_(VR::HMD_EYE_RIGHT);
         drawcall_submit[cur_log_frame] = (system::GetTime() - t0);
 /*
         // bad performance for Radeon R9 390, if present here...
@@ -578,7 +637,7 @@ public:
         if (renderer.BeginScene()) {
             Primitives& prim = Primitives::GetInstance();
             ITexture* tex = surfaceL_->GetRenderTarget(0);
-#ifdef DRAW_SINGLE_VIEW
+#ifndef DRAW_DUAL_VIEWS
             if (tex) {
                 if (prim.BeginDraw(tex, GFXPT_SCREEN_QUADLIST)) {
                     float const dst_aspect_ratio = renderer.GetScreenAspectRatio();
@@ -727,8 +786,8 @@ public:
                         font_->DrawText(0.01f, y, font_size, font_color, msg);
                     }
 
-                    float const buffer_pos = 0.158f*1600.0f/width_;
-                    float const packet_pos = 0.228f*1600.0f/width_;
+                    float const buffer_pos = 0.01f + 0.16f*DEFAULT_WINDOW_WIDTH/width_;
+                    float const packet_pos = 0.01f + 0.24f*DEFAULT_WINDOW_WIDTH/width_;
 
                     AUDIO_TECHNIQUE tech = AUDIO_TECHNIQUE_DEFAULT;
                     char const* audioinfo = player_.GetAudioInfo(tech);
@@ -740,7 +799,7 @@ public:
                         memset(msg, '-', 11);
                         msg[out_of_sync + 5] = '+';
                         msg[11] = '\0';
-                        y += font_->DrawText(buffer_pos, y, font_size, font_color, msg);
+                        y += font_->DrawText(buffer_pos, y, font_size+1, font_color, msg);
                     }
                     else {
                         y += dy;
@@ -914,7 +973,7 @@ public:
         renderer.SetSurface(NULL);
 
         // 2) draw next frames to be presented in the next loop
-        bool const ret = DrawScene(VR::HMD_EYE_LEFT) && DrawScene(VR::HMD_EYE_RIGHT);
+        bool const ret = DrawScene_(VR::HMD_EYE_LEFT) && DrawScene_(VR::HMD_EYE_RIGHT);
 
         renderer.PushState();
 
@@ -925,7 +984,7 @@ public:
         if (renderer.BeginScene()) {
             Primitives& prim = Primitives::GetInstance();
             ITexture* tex = surfaceL_->GetRenderTarget(0);
-#ifdef DRAW_SINGLE_VIEW
+#ifndef DRAW_DUAL_VIEWS
             if (tex) {
                 if (prim.BeginDraw(tex, GFXPT_SCREEN_QUADLIST)) {
                     float const dst_aspect_ratio = renderer.GetScreenAspectRatio();
@@ -977,16 +1036,17 @@ public:
             }
 #endif
             Color const viveClr = { 46, 161, 193, 255 };
-            player_.DrawVideoPathOnScreen(0.005f, 0.005f, 36.0f/renderer.GetFramebufferHeight(),
-                                          renderer.GetFramebufferAspectRatio(), viveClr, 0);
-            float const show_info_y0 = 0.0525f;
+            player_.DrawVideoPathOnScreen(0.005f, 0.005f, 36.0f/height_,
+                                          (float)width_/height_, viveClr, 0);
+            float const show_info_y0 = 0.0285f*DEFAULT_WINDOW_WIDTH/height_;
             if (font_) {
                 Color const color = { 128, 128, 128, 192 };
                 int const font_size = 16;
                 float y = 0.99f;
                 if (display_info_>0) {
                     char msg[160];
-                    float const credit_align = 0.99f - 0.26f*1440.0f/renderer.GetFramebufferWidth();
+                    float const dy = font_->DrawText(0.99f, 0.01f, font_size, Color::Yellow, "[Toggle Display:D]", FONT_ALIGN_RIGHT);
+                    float const credit_align = 0.99f - 0.245f*DEFAULT_WINDOW_WIDTH/width_;
                     y -= font_->DrawText(credit_align, y, font_size, color, "    SDL, GLEW, uchardet & Balai3D", FONT_ALIGN_BOTTOM);
                     y -= font_->DrawText(credit_align, y, font_size, color, "    Google omnitone, Kiss FFT,", FONT_ALIGN_BOTTOM);
                     y -= font_->DrawText(credit_align, y, font_size, color, "    FFmpeg, NVDEC, AMD AMF,", FONT_ALIGN_BOTTOM);
@@ -1000,10 +1060,9 @@ public:
 
                     y = show_info_y0;
                     Color const font_color = Color::White;
-                    font_->DrawText(0.99f, 0.01f, 16, Color::Yellow, "[Toggle Display:D]", FONT_ALIGN_RIGHT);
                     std::sprintf(msg, "FPS : %d", int(GetFPS()+0.5f));
-                    float const dy = font_->DrawText(0.01f, y, font_size, font_color, msg);
-                    y += dy + 0.005f;
+                    y += font_->DrawText(0.01f, y, font_size, font_color, msg);
+                    //y += dy + 0.005f;
 
                     if (msaa_enable_) {
                         std::sprintf(msg, "MSAA : %dx", multisampleSamples_);
@@ -1030,7 +1089,7 @@ public:
 
                     if (player_.IsLoaded()) {
                         int w, h, ms, m, s;
-                        std::sprintf(msg, "360 Video [F2] : %s", player_.SphericalVideoType());
+                        std::sprintf(msg, "Projection [F2] : %s", player_.VideoProjection());
                         y += font_->DrawText(0.01f, y, font_size, font_color, msg);
 
                         std::sprintf(msg, "Stereoscopic [F3] : %s", player_.Stereo3D());
@@ -1041,7 +1100,7 @@ public:
                             font_->DrawText(0.01f, y, font_size, font_color, "Video Decoder [F4] :");
                             int const hw_decoder = player_.IsHardwareVideoDecoder();
                             Color const clr = (hw_decoder>0) ? ((hw_decoder>1) ? (Color::Yellow):(Color::Red)):font_color;
-                            y += font_->DrawText(0.158f*1600.0f/width_, y, font_size, clr, player_.VideoDecoderName());
+                            y += font_->DrawText(0.01f+0.156f*DEFAULT_WINDOW_WIDTH/width_, y, font_size, clr, player_.VideoDecoderName());
                         }
                         else {
                             std::sprintf(msg, "Video Decoder : %s", player_.VideoDecoderName());
@@ -1066,8 +1125,8 @@ public:
                         y += font_->DrawText(0.01f, y, font_size, font_color, msg);
 
                         // video/audio buffer
-                        float const buffer_pos = 0.158f*1600.0f/width_;
-                        float const packet_pos = 0.228f*1600.0f/width_;
+                        float const buffer_pos = 0.01f + 0.16f*DEFAULT_WINDOW_WIDTH/width_;
+                        float const packet_pos = 0.01f + 0.24f*DEFAULT_WINDOW_WIDTH/width_;
 
                         int videotime = player_.VideoTime(); if (videotime<0) videotime = 0;
                         int audiotime = player_.AudioTime(); if (audiotime<0) audiotime = 0;
@@ -1078,7 +1137,7 @@ public:
                             memset(msg, '-', 11);
                             msg[out_of_sync + 5] = '+';
                             msg[11] = '\0';
-                            font_->DrawText(buffer_pos, y, font_size, font_color, msg);
+                            font_->DrawText(buffer_pos, y, font_size+1, font_color, msg);
                         }
 
                         int const duration = player_.Duration();
@@ -1093,7 +1152,7 @@ public:
                         else {
                             char const* p = "...";
                             std::sprintf(msg, "Length : live streaming%s", p + (3-((videotime/250)%4)));
-                            y += font_->DrawText(0.01f, y, 15, Color::White, msg);
+                            y += font_->DrawText(0.01f, y, font_size, Color::White, msg);
                         }
 
                         if (player_.IsPlaying()) {
@@ -1103,7 +1162,7 @@ public:
                                 if (vb>10) vb = 10;
                                 memset(msg, '+', vb);
                                 msg[vb] = '\0';
-                                font_->DrawText(buffer_pos, y, 15, font_color, msg);
+                                font_->DrawText(buffer_pos, y, font_size, font_color, msg);
                                 if (packets>0) {
                                     if (packets>120) packets = 120;
                                     int c = 0;
@@ -1113,7 +1172,7 @@ public:
                                             msg[c++] = ' ';
                                     }
                                     msg[c] = '\0';
-                                    font_->DrawText(packet_pos, y, 15, font_color, msg);
+                                    font_->DrawText(packet_pos, y, font_size, font_color, msg);
                                 }
                             }
 
@@ -1131,7 +1190,7 @@ public:
                                     ab /= 100;
                                     memset(msg, '+', ab);
                                     msg[ab] = '\0';
-                                    font_->DrawText(buffer_pos, y, 15, font_color, msg);
+                                    font_->DrawText(buffer_pos, y, font_size, font_color, msg);
                                     if (packets>0) {
                                         if (packets>120) packets = 120;
                                         int c = 0;
@@ -1141,7 +1200,7 @@ public:
                                                 msg[c++] = ' ';
                                         }
                                         msg[c] = '\0';
-                                        font_->DrawText(packet_pos, y, 15, font_color, msg);
+                                        font_->DrawText(packet_pos, y, font_size, font_color, msg);
                                     }
                                 }
 
@@ -1181,7 +1240,7 @@ public:
                                                 0<=extStreamId ? extStreamId:streamId,
                                                 hardsub ? ", hardsub":"");
                                 }
-                                y += font_->DrawText(0.01f, y, 15, Color::White, msg);
+                                y += font_->DrawText(0.01f, y, font_size, Color::White, msg);
                             }
                             else {
                                 y+=font_->DrawText(0.01f, y, font_size, font_color, "Subtitle : N/A");
@@ -1407,14 +1466,14 @@ public:
                 player_.ToggleLoopMode();
                 break;
 
-            case SDLK_F2: // video type : plane, 180, 360
+            case SDLK_F2: // video type : plane, equirectangular180, equirectangular360, cubemap360, eac360
                 if (0==key.repeat)
                     player_.ToggleSphericalVideoType();
                 break;
 
             case SDLK_F3: // mono, stereo,...
                 if (0==key.repeat) {
-                    player_.ToggleStereoScope();
+                    player_.ToggleStereoscopic3D();
                 }
                 break;
 
@@ -1426,6 +1485,22 @@ public:
             case SDLK_F5: // ambiX <--> FuMa
                 if (0==key.repeat)
                     player_.ToggleAmbisonicFormat();
+                break;
+/*
+            case SDLK_F7:
+                if (0==key.repeat) {
+                    player_.ToggleCubemapPadding(1);
+                }
+                break;
+            case SDLK_F8:
+                if (0==key.repeat) {
+                    player_.ToggleCubemapPadding(-1);
+                }
+                break;
+*/
+            case SDLK_F9:
+                if (0==key.repeat)
+                    player_.ToggleCubemapType();
                 break;
 
 #ifndef HTC_VIVEPORT_RELEASE
@@ -1481,9 +1556,16 @@ public:
         return false;
     }
 
+    // mouse move
+    //void TouchBegan(uint32 touchId, uint32 tapCount, float x, float y) {}
+    void TouchMoved(uint32 touchId, uint32 tapCount, float /*x*/, float /*y*/, float dx, float dy) {
+        if (0==touchId && 0==tapCount && fabs(dx)>2.0f*fabs(dy)) {
+            player_.AdjustAzimuthAngle(dx);
+        }
+    }
+    //void TouchEnded(uint32 touchId, uint32 tapCount, float x, float y) {}
+
     DECLARE_APPLICATION_CLASS;
 };
 
 IMPLEMENT_APPLICATION_CLASS(MyApp);
-
-}}}

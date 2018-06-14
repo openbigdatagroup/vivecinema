@@ -84,10 +84,10 @@ inline bool xml_junk_char(char c) {
 //-----------------------------------------------------------------------------
 // quick parser
 //-----------------------------------------------------------------------------
-typedef bool (*XML_BeginTagCallBack)(XML_Element const& ele, XML_Element const* ascent);
-typedef bool (*XML_EndTagCallBack)(XML_Element const& ele, XML_Element const* ascent);
+typedef bool (*XML_BeginTagCallBack)(XML_Element const& ele, XML_Element const* ascent, void* user);
+typedef bool (*XML_EndTagCallBack)(XML_Element const& ele, XML_Element const* ascent, void* user);
 
-bool ParseXMLFile(char const* xmlFile, XML_BeginTagCallBack beginCallback, XML_EndTagCallBack endCallback);
+bool ParseXMLFile(char const* xmlFile, XML_BeginTagCallBack beginCallback, XML_EndTagCallBack endCallback, void* user);
 
 
 //-----------------------------------------------------------------------------

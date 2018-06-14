@@ -600,6 +600,15 @@ public:
         }
         return false;
     }
+    // 0:FFmpeg SW, 1:GPU(AMF/NVDEC), 2+:FFmpeg + hw accel. 0xff:unknown   -2018.06.04
+    void SetPreferVideoDecoder(uint8 hwAccel) {
+        if (1==hwAccel) 
+            videoDecoderPreference_ = 1;
+        else if (0==hwAccel)
+            videoDecoderPreference_ = 0;
+        else
+            videoDecoderPreference_ = 0xff; // to be determined when loading
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////
     // call with care... FixErrorDuration() is to work around some videos with
