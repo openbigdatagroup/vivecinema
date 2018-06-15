@@ -4,7 +4,7 @@ Vive Cinema is a light-weight, high performance VR video player for HTC VIVE.
 
 ### Features
 * Video
-	* Plane, 180 or 360
+	* Plane, Equirectangular 180 or 360, CubeMap & EAC(Equi-Angular Map)
 	* Mono, Side-By-Side or Over-Under Stereoscopic 3D
 	* Hardware Accelerated Decoder Integrated
 		* NVIDIA Video Codec SDK
@@ -50,6 +50,7 @@ Balai 3D/VR is a rendering framework we created for easily building simple 3D/VR
 * Leveraging VS2012 non C++ standard std::async() for asynchronization.
 * Potential crash on 32-bit build for huge videos(e.g. 4096x4096, 8192x8192). Always use 64-bit build if possible.
 * AMD AMF GPU accelerated video decoder is still testing. Switch back to CPU decoder (Press F4) if any problem occurs.
+* Cubemap/EAC may experience visible seams, tweak 'padding' settings to minimize it. (refer vivecinema.xml for more details)
 
 ### License
 Vive Cinema is distributed under the terms of GPLv3 with respect to FFmpeg.
