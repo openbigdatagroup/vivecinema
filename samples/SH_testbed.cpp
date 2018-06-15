@@ -54,6 +54,7 @@ class MyApp : public BaseApp
 {
     //enum { TEST_BANDS = SphericalHarmonics::MAX_BANDS };
     enum { MAX_TEST_BANDS = 8 };
+    double sh_delta_[MAX_TEST_BANDS*MAX_TEST_BANDS];
 
     // font
     IAsciiFont* font_;
@@ -69,6 +70,7 @@ class MyApp : public BaseApp
     int test_Ylm_;
     int rotation_style_; // 0:SH, 1:ambiX
     int test_bands_;
+    int tweak_lm_;
 
     bool condon_shortley_, ctrlDown_, altDown_;
 
@@ -79,8 +81,9 @@ public:
         distance_(1.4f),yaw_(0.0f),pitch_(0.0f),roll_(0.0f),
         objyaw_(0.0f),objpitch_(0.0f),objroll_(0.0f),
         test_Ylm_(MAX_TEST_BANDS*MAX_TEST_BANDS),
-        rotation_style_(1),test_bands_(MAX_TEST_BANDS),
+        rotation_style_(1),test_bands_(MAX_TEST_BANDS),tweak_lm_(MAX_TEST_BANDS*MAX_TEST_BANDS),
         condon_shortley_(false),ctrlDown_(false),altDown_(false) {
+        memset(sh_delta_, 0, sizeof(sh_delta_));
         window_title_ = "Spherical Harmonics";
         width_  = 1920;
         height_ = 1080;
@@ -248,6 +251,10 @@ public:
             }
         }
 
+        for (int i=0; i<test_bands_*test_bands_; ++i) {
+            sh[i] += sh_delta_[i];
+        }
+
         double const t0 = system::GetTime();
 
         SphericalHarmonics::SHRotateMatrix shRot;
@@ -315,15 +322,15 @@ public:
 
                     prim.SetColor(Color::Red);
                     prim.AddVertex(0.0f, 0.0f, 0.0f);
-                    prim.AddVertex(1.0f, 0.0f, 0.0f);
+                    prim.AddVertex(10.0f, 0.0f, 0.0f);
 
                     prim.SetColor(Color::Green);
                     prim.AddVertex(0.0f, 0.0f, 0.0f);
-                    prim.AddVertex(0.0f, 1.0f, 0.0f);
+                    prim.AddVertex(0.0f, 10.0f, 0.0f);
 
                     prim.SetColor(Color::Blue);
                     prim.AddVertex(0.0f, 0.0f, 0.0f);
-                    prim.AddVertex(0.0f, 0.0f, 1.0f);
+                    prim.AddVertex(0.0f, 0.0f, 10.0f);
 
                     prim.EndDraw();
                 }
@@ -394,6 +401,8 @@ public:
                 }
                 if (!altDown_) {
                     y += 0.05f;
+                    int tweak_l = 0;
+                    int tweak_m = 0;
                     for (int i=0; i<test_bands_; ++i) {
                         msg[0] = msg2[0] = '\0';
 
@@ -415,10 +424,23 @@ public:
                             else {
                                 sprintf(msg2, "%s  0.0000", msg2);
                             }
+
+                            if (tweak_lm_==(i*(i+1) + j)) {
+                                tweak_l = i;
+                                tweak_m = j;
+                            }
                         }
 
                         font_->DrawText(0.005f, y, 16, z0 ? Color::Gray:Color::White, msg);
                         y += font_->DrawText(0.995f, y+0.45f, 16, z2 ? Color::Gray:Color::Yellow, msg2, FONT_ALIGN_RIGHT);
+                    }
+
+                    if (tweak_lm_<(MAX_TEST_BANDS*MAX_TEST_BANDS)) {
+                        sprintf(msg, "Tweak Y(%d, %d)  [Enter/+/-]", tweak_l, tweak_m);
+                        font_->DrawText(0.5f, 0.995f, 24, Color::Cyan, msg, FONT_ALIGN_CENTERED_X|FONT_ALIGN_BOTTOM);
+                    }
+                    else {
+                        font_->DrawText(0.5f, 0.995f, 24, Color::Cyan, "Tweak mode [Enter]", FONT_ALIGN_CENTERED_X|FONT_ALIGN_BOTTOM);
                     }
                 }
             }
@@ -493,14 +515,32 @@ public:
             case SDLK_RIGHT:
                 return true;
 
-            case SDLK_DOWN:
+            case SDLK_KP_PLUS:
+                if (tweak_lm_<(MAX_TEST_BANDS*MAX_TEST_BANDS)) {
+                    sh_delta_[tweak_lm_] += 0.1f;
+                }
+                break;
+
             case SDLK_KP_MINUS:
-            case SDLK_MINUS:
+                if (tweak_lm_<(MAX_TEST_BANDS*MAX_TEST_BANDS)) {
+                    sh_delta_[tweak_lm_] -= 0.1f;
+                }
+                break;
+
+            case SDLK_KP_ENTER:
+            case SDLK_RETURN:
+                if (tweak_lm_<(MAX_TEST_BANDS*MAX_TEST_BANDS)) {
+                    tweak_lm_ = (tweak_lm_+1)%(MAX_TEST_BANDS*MAX_TEST_BANDS);
+                }
+                else {
+                    tweak_lm_ = 0;
+                }
+                break;
+
+            case SDLK_DOWN:
                 break;
 
             case SDLK_UP:
-            case SDLK_KP_PLUS:
-            case SDLK_PLUS:
                 objpitch_ = objyaw_  = objroll_ = 0.0f;
                 break;
 
@@ -509,8 +549,10 @@ public:
             case SDLK_3:
             case SDLK_4:
                 break;
-            
+
             case SDLK_SPACE:
+                tweak_lm_ = (MAX_TEST_BANDS*MAX_TEST_BANDS);
+                memset(sh_delta_, 0, sizeof(sh_delta_));
                 test_Ylm_ = (test_Ylm_+1)%(test_bands_*test_bands_+1);
                 objpitch_ = objyaw_  = objroll_ = 0.0f;
                 return true;

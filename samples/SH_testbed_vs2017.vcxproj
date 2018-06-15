@@ -222,11 +222,6 @@ copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\x64\glew32.dll" "$(OutDir)\
   <ItemGroup>
     <ClCompile Include="SH_testbed.cpp" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\balai\build\balai_vs2017.vcxproj">
-      <Project>{0790445d-9496-4476-957d-4257c9f90bec}</Project>
-    </ProjectReference>
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
