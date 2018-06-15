@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="Pan360.cpp" />
+    <ClCompile Include="..\vivecinema\ISO639.cpp">
+      <Filter>Vive Cinema</Filter>
+    </ClCompile>
+    <ClCompile Include="..\vivecinema\Win32Font.cpp">
+      <Filter>Vive Cinema</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Pan360.h" />
+    <ClInclude Include="resource.h">
+      <Filter>resource</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="resource">
+      <UniqueIdentifier>{4272048f-8627-4b1e-9ab2-4259ff991d6d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Vive Cinema">
+      <UniqueIdentifier>{2d5c2794-6c85-4d79-ab00-7a72d74b3e26}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Pan360.rc">
+      <Filter>resource</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="vive.ico">
+      <Filter>resource</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <Xml Include="pan360.xml" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<pan360>
+  <windows title="Pan360 - Equirectangular Map Viewer" width="1920" height="1080" fullscreen="0" />
+  <path>./equirectangular</path>
+</pan360>
