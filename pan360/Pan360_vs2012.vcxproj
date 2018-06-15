@@ -1,17 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|Win32">
-      <Configuration>Debug</Configuration>
-      <Platform>Win32</Platform>
-    </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
       <Platform>x64</Platform>
-    </ProjectConfiguration>
-    <ProjectConfiguration Include="Release|Win32">
-      <Configuration>Release</Configuration>
-      <Platform>Win32</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|x64">
       <Configuration>Release</Configuration>
@@ -25,22 +17,11 @@
     <ProjectName>Pan360</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v110</PlatformToolset>
-    <CharacterSet>Unicode</CharacterSet>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <PlatformToolset>v110</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v110</PlatformToolset>
-    <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -50,13 +31,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
@@ -66,57 +41,16 @@
   <PropertyGroup>
     <_ProjectFileVersion>11.0.61030.0</_ProjectFileVersion>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <OutDir>$(SolutionDir)bin\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
-    <IntDir>$(SolutionDir)bin\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental>true</LinkIncremental>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>$(SolutionDir)bin\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
-    <IntDir>$(SolutionDir)bin\vs2012\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(SolutionDir)bin\intermediate\VS$(VisualStudioVersion)\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <ClCompile>
-      <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>../balai/include;../vivecinema;../third_party/uchardet/src;../third_party/libpng;../third_party/libjpeg;../third_party/glew/include/GL;../third_party/SDL2/include</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;INIT_CUDA_GL;_CRT_SECURE_NO_WARNINGS;BL_AVDECODER_VERBOSE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
-      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <PrecompiledHeader>
-      </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)vc90.pdb</ProgramDataBaseFileName>
-      <WarningLevel>Level4</WarningLevel>
-      <TreatWarningAsError>false</TreatWarningAsError>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-    </ClCompile>
-    <Link>
-      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
-      <AdditionalLibraryDirectories>$(BALAI_SDK_ROOT)/middlewares/openvr/lib/$(PlatformName);$(BALAI_SDK_ROOT)/middlewares/ffmpeg/lib/win32;$(BALAI_SDK_ROOT)/middlewares/SDL2/lib/x86;$(BALAI_SDK_ROOT)/middlewares/glew/lib/Release/Win32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <SubSystem>Windows</SubSystem>
-      <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-    </Link>
-    <PostBuildEvent>
-      <Command>copy "$(TargetPath)" ".\bin\Pan360.exe"</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>copying...</Message>
-    </PostBuildEvent>
-  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
@@ -141,39 +75,6 @@
     <PostBuildEvent>
       <Message>copying...</Message>
       <Command>copy "$(TargetPath)" "..\vivecinema\bin\Pan360_debug.exe"</Command>
-    </PostBuildEvent>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <ClCompile>
-      <Optimization>MaxSpeed</Optimization>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>../balai/include;../vivecinema;../third_party/uchardet/src;../third_party/libpng;../third_party/libjpeg;../third_party/glew/include/GL;../third_party/SDL2/include</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;INIT_CUDA_GL;_WINDOWS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <FunctionLevelLinking>true</FunctionLevelLinking>
-      <PrecompiledHeader>
-      </PrecompiledHeader>
-      <ProgramDataBaseFileName>$(IntDir)vc90.pdb</ProgramDataBaseFileName>
-      <WarningLevel>Level4</WarningLevel>
-      <TreatWarningAsError>false</TreatWarningAsError>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-    </ClCompile>
-    <Link>
-      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
-      <AdditionalLibraryDirectories>$(BALAI_SDK_ROOT)/middlewares/openvr/lib/$(PlatformName);$(BALAI_SDK_ROOT)/middlewares/ffmpeg/lib/win32;$(BALAI_SDK_ROOT)/middlewares/SDL2/lib/x86;$(BALAI_SDK_ROOT)/middlewares/glew/lib/Release/Win32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
-      <SubSystem>Windows</SubSystem>
-      <OptimizeReferences>true</OptimizeReferences>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <TargetMachine>MachineX86</TargetMachine>
-      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <AdditionalDependencies>balai_vs2012.lib;libuchardet_vs2012.lib;%(AdditionalDependencies)</AdditionalDependencies>
-    </Link>
-    <PostBuildEvent>
-      <Command>copy "$(TargetPath)" ".\bin\Pan360.exe"</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>copying...</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">

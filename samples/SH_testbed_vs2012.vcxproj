@@ -109,8 +109,8 @@
       <AdditionalDependencies>balai_vs2012_debug.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(BALAI_SDK_ROOT)\middlewares\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"
-copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\Win32\glew32.dll" "$(OutDir)\glew32.dll"</Command>
+      <Command>copy "$(ProjectDir)..\third_party\glew\bin\Release\Win32\glew32.dll" "$(OutDir)\glew32.dll"
+copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
       <Message>
       </Message>
     </PostBuildEvent>
@@ -137,8 +137,8 @@ copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\Win32\glew32.dll" "$(OutDir
       <AdditionalDependencies>balai_vs2012_debug.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(BALAI_SDK_ROOT)\middlewares\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"
-copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\x64\glew32.dll" "$(OutDir)\glew32.dll"</Command>
+      <Command>copy "$(ProjectDir)..\third_party\glew\bin\Release\x64\glew32.dll" "$(OutDir)\glew32.dll"
+copy "$(ProjectDir)..\third_party\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
       <Message>
       </Message>
     </PostBuildEvent>
@@ -169,8 +169,8 @@ copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\x64\glew32.dll" "$(OutDir)\
       <AdditionalDependencies>balai_vs2012.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(BALAI_SDK_ROOT)\middlewares\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"
-copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\Win32\glew32.dll" "$(OutDir)\glew32.dll"</Command>
+      <Command>copy "$(ProjectDir)..\third_party\glew\bin\Release\Win32\glew32.dll" "$(OutDir)\glew32.dll"
+copy "$(ProjectDir)..\third_party\SDL2\lib\x86\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -198,8 +198,8 @@ copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\Win32\glew32.dll" "$(OutDir
       <AdditionalDependencies>balai_vs2012.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(BALAI_SDK_ROOT)\middlewares\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"
-copy "$(BALAI_SDK_ROOT)\middlewares\glew\bin\Release\x64\glew32.dll" "$(OutDir)\glew32.dll"</Command>
+      <Command>copy "$(ProjectDir)..\third_party\glew\bin\Release\x64\glew32.dll" "$(OutDir)\glew32.dll"
+copy "$(ProjectDir)..\third_party\SDL2\lib\x64\SDL2.dll" "$(OutDir)\SDL2.dll"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>

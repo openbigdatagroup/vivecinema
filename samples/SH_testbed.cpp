@@ -78,15 +78,15 @@ public:
     MyApp():
         font_(NULL),
         sh_init_(),
-        distance_(1.4f),yaw_(0.0f),pitch_(0.0f),roll_(0.0f),
+        distance_(2.0f),yaw_(0.0f),pitch_(0.0f),roll_(0.0f),
         objyaw_(0.0f),objpitch_(0.0f),objroll_(0.0f),
         test_Ylm_(MAX_TEST_BANDS*MAX_TEST_BANDS),
         rotation_style_(1),test_bands_(MAX_TEST_BANDS),tweak_lm_(MAX_TEST_BANDS*MAX_TEST_BANDS),
         condon_shortley_(false),ctrlDown_(false),altDown_(false) {
         memset(sh_delta_, 0, sizeof(sh_delta_));
         window_title_ = "Spherical Harmonics";
-        width_  = 1920;
-        height_ = 1080;
+        width_  = 1280;
+        height_ =  720;
     }
     ~MyApp() {}
 
@@ -500,6 +500,15 @@ public:
             switch (key.keysym.sym)
             {
             case SDLK_s:
+                return true;
+
+            case SDLK_c:
+                if (rotation_style_) {
+                    condon_shortley_ = false;
+                }
+                else {
+                    condon_shortley_ = !condon_shortley_;
+                }
                 return true;
 
             case SDLK_r:
