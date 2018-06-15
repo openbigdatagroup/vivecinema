@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloBalaiVR_vs2012", "Hell
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloVoxel_vs2012", "HelloVoxel_vs2012.vcxproj", "{A1A53901-6A84-4C1D-B3C8-A4985392A17F}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SH_testbed_vs2012", "SH_testbed_vs2012.vcxproj", "{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -39,6 +41,14 @@ Global
 		{A1A53901-6A84-4C1D-B3C8-A4985392A17F}.Release|Win32.Build.0 = Release|Win32
 		{A1A53901-6A84-4C1D-B3C8-A4985392A17F}.Release|x64.ActiveCfg = Release|x64
 		{A1A53901-6A84-4C1D-B3C8-A4985392A17F}.Release|x64.Build.0 = Release|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|Win32.ActiveCfg = Debug|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|Win32.Build.0 = Debug|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|x64.ActiveCfg = Debug|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|x64.Build.0 = Debug|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|Win32.ActiveCfg = Release|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|Win32.Build.0 = Release|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|x64.ActiveCfg = Release|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

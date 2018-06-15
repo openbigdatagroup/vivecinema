@@ -1,13 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.27004.2002
+VisualStudioVersion = 15.0.27130.2027
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloBalai_vs2017", "HelloBalai_vs2017.vcxproj", "{418F4E3D-F8E9-4669-A485-BD3CE11A7B23}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloBalaiVR_vs2017", "HelloBalaiVR_vs2017.vcxproj", "{14652B1E-2D72-4B6F-9738-7C3C940298B5}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloVoxel_vs2017", "HelloVoxel_vs2017.vcxproj", "{A1A53901-6A84-4C1D-B3C8-A4985392A17F}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SH_testbed_vs2017", "SH_testbed_vs2017.vcxproj", "{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -41,6 +43,14 @@ Global
 		{A1A53901-6A84-4C1D-B3C8-A4985392A17F}.Release|x64.Build.0 = Release|x64
 		{A1A53901-6A84-4C1D-B3C8-A4985392A17F}.Release|x86.ActiveCfg = Release|Win32
 		{A1A53901-6A84-4C1D-B3C8-A4985392A17F}.Release|x86.Build.0 = Release|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|x64.ActiveCfg = Debug|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|x64.Build.0 = Debug|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|x86.ActiveCfg = Debug|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Debug|x86.Build.0 = Debug|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|x64.ActiveCfg = Release|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|x64.Build.0 = Release|x64
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|x86.ActiveCfg = Release|Win32
+		{F7989F82-8121-4D1A-899A-DB0E6C5BC8A2}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
