@@ -1382,17 +1382,23 @@ bool AVDecoder::DoOpen_(AVFormatContext* fmtCtx,  char const* url, VideoOpenOpti
             break;
 
         case AVMEDIA_TYPE_AUDIO:
-            ++audioStreamCount_;
-            if (0<=aid && audioStreamIndex_<0) {
-                audioStreamIndex_ = i; // the 1st audio stream index
-            }
+            if (stream->codecpar && NULL!=avcodec_find_decoder(stream->codecpar->codec_id)) {
+                ++audioStreamCount_;
+                if (0<=aid && audioStreamIndex_<0) {
+                    audioStreamIndex_ = i; // the 1st audio stream index
+                }
 
-            // [bug?] #(channels) and channel_layout not match!?
-            if (stream->codecpar->channels!=av_get_channel_layout_nb_channels(stream->codecpar->channel_layout)) {
-                uint64_t const new_channel_layout = av_get_default_channel_layout(stream->codecpar->channels);
-                BL_LOG("** [FFmpeg bug?] audio track#%d(channels=%d) suspicious channel layout:0x%llX -> 0x%llX\n",
-                       i, stream->codecpar->channels, stream->codecpar->channel_layout, new_channel_layout);
-                stream->codecpar->channel_layout = new_channel_layout;
+                // [bug?] #(channels) and channel_layout not match!?
+                if (stream->codecpar->channels!=av_get_channel_layout_nb_channels(stream->codecpar->channel_layout)) {
+                    uint64_t const new_channel_layout = av_get_default_channel_layout(stream->codecpar->channels);
+                    BL_LOG("** [FFmpeg bug?] audio track#%d(channels=%d) suspicious channel layout:0x%llX -> 0x%llX\n",
+                           i, stream->codecpar->channels, stream->codecpar->channel_layout, new_channel_layout);
+                    stream->codecpar->channel_layout = new_channel_layout;
+                }
+            }
+            else {
+                BL_LOG("** [FFmpeg bug?] invalid audio track#%d - channels=%d layout:0x%llX codec:%s\n",
+                       i, stream->codecpar->channels, stream->codecpar->channel_layout, avcodec_get_name(stream->codecpar->codec_id));
             }
             break;
 

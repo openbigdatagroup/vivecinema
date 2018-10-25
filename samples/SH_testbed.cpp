@@ -85,8 +85,9 @@ public:
         condon_shortley_(false),ctrlDown_(false),altDown_(false) {
         memset(sh_delta_, 0, sizeof(sh_delta_));
         window_title_ = "Spherical Harmonics";
-        width_  = 1280;
-        height_ =  720;
+        //BaseApp::fullscreen_ = 1;
+        width_ = 1440;
+        height_ = 720;
     }
     ~MyApp() {}
 
@@ -353,7 +354,7 @@ public:
                 }
 
                 if (!altDown_) {
-                    renderer.SetWorldMatrix(Matrix3(1.0f, 0.0, 0.0f)*ltm);
+                    renderer.SetWorldMatrix(Matrix3(2.0f, 0.0, 0.0f)*ltm);
                 }
                 else {
                     renderer.SetWorldMatrix(ltm);
@@ -377,7 +378,7 @@ public:
 
             renderer.SetCullMode(GFXCULL_BACK);
          
-            char msg[256], msg2[256];
+            char msg[256];
             float y = 0.01f;
             sprintf(msg, "FPS : %.1f", GetFPS());
 
@@ -396,43 +397,44 @@ public:
                 //sprintf(msg, "SH rotate time:%.4fms (%d bands)", 1000.0f*sh_rotate_time, test_bands_);
                 //y += font_->DrawText(0.01f, y, 20, Color::White, msg);
                 if (test_Ylm_<test_bands_*test_bands_) {
-                    sprintf(msg, "SH(%d) function", test_Ylm_);
-                    y += font_->DrawText(0.01f, y, 20, Color::White, msg);
+                    //sprintf(msg, "SH(%d) function", test_Ylm_);
+                    //y += font_->DrawText(0.01f, y, 20, Color::White, msg);
                 }
                 if (!altDown_) {
                     y += 0.05f;
                     int tweak_l = 0;
                     int tweak_m = 0;
                     for (int i=0; i<test_bands_; ++i) {
-                        msg[0] = msg2[0] = '\0';
-
-                        bool z0(true), z2(true);
+                        float const offset0 = 0.052f;
+                        float const offset1 = 0.0053f;
+                        float x0 = 0.01f;
+                        float x1 = 1.0f - x0 - offset0;
                         for (int j=-i; j<=i; ++j) {
                             double s = sh(i, j);
-                            if (s>0.00005 || s<-0.00005f) {
-                                z0 = false;
-                                sprintf(msg, "%s  %.4f", msg, s);
+                            if (-0.00005<s && s<0.00005f) { // don't want to print out -0.0000
+                                s = 0.0000;
                             }
-                            else {
-                                sprintf(msg, "%s  0.0000", msg);
-                            }
-                            s = sh_rotate(i, j);
-                            if (s>0.00005 || s<-0.00005f) {
-                                z2 = false;
-                                sprintf(msg2, "%s  %.4f", msg2, s);
-                            }
-                            else {
-                                sprintf(msg2, "%s  0.0000", msg2);
-                            }
+                            sprintf(msg, "%.4f", s);
+                            font_->DrawText(s>0 ? x0 : (x0 - offset1), y, 12, (s != 0) ? Color::White : Color::Gray, msg);
 
-                            if (tweak_lm_==(i*(i+1) + j)) {
+                            s = sh_rotate(i, -j);
+                            if (-0.00005<s && s<0.00005f) {
+                                s = 0.0000;
+                            }
+                            sprintf(msg, "%.4f", s);
+                            float const dy = font_->DrawText(s > 0 ? x1 : (x1 - offset1), y + 0.45f, 12, (s != 0) ? Color::Yellow : Color::Gray, msg);
+                            
+                            x0 += offset0;
+                            x1 -= offset0;
+
+                            if (j == i)
+                                y += dy;
+
+                            if (tweak_lm_ == (i*(i + 1) + j)) {
                                 tweak_l = i;
                                 tweak_m = j;
                             }
                         }
-
-                        font_->DrawText(0.005f, y, 16, z0 ? Color::Gray:Color::White, msg);
-                        y += font_->DrawText(0.995f, y+0.45f, 16, z2 ? Color::Gray:Color::Yellow, msg2, FONT_ALIGN_RIGHT);
                     }
 
                     if (tweak_lm_<(MAX_TEST_BANDS*MAX_TEST_BANDS)) {
@@ -557,6 +559,10 @@ public:
             case SDLK_2:
             case SDLK_3:
             case SDLK_4:
+                tweak_lm_ = (MAX_TEST_BANDS*MAX_TEST_BANDS);
+                memset(sh_delta_, 0, sizeof(sh_delta_));
+                test_Ylm_ = test_bands_*test_bands_;
+                objpitch_ = objyaw_ = objroll_ = 0.0f;
                 break;
 
             case SDLK_SPACE:

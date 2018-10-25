@@ -30,8 +30,10 @@
 #include <new>
 
 #ifdef BL_DEBUG_BUILD
+#ifndef BL_NO_MEMORY_TRACKER
 #ifndef BL_TRACKING_MEMORY
 #define BL_TRACKING_MEMORY
+#endif
 #endif
 #endif
 

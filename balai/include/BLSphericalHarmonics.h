@@ -262,6 +262,42 @@ namespace SphericalHarmonics {
             bands_ = size_ = 0;
         }
 
+        SHRotateMatrix& operator=(SHRotateMatrix const& rhs) {
+            if (this!=&rhs) {
+                if (rhs.bands_>0) {
+                    m00_ = rhs.m00_; // zero order, normally 1.0f
+                    m11_ = rhs.m11_; m12_ = rhs.m12_; m13_ = rhs.m13_; // first order rotation matrix 3x3
+                    m21_ = rhs.m21_; m22_ = rhs.m22_; m23_ = rhs.m23_;
+                    m31_ = rhs.m31_; m32_ = rhs.m32_; m33_ = rhs.m33_;
+                    bands_ = rhs.bands_;
+                
+                    int total_submtx_elements = 0;
+                    for (int i=2; i<rhs.bands_; ++i) {
+                        int const dim = i*2 + 1;
+                        total_submtx_elements += dim*dim;
+                    }
+
+                    if (total_submtx_elements>0) {
+                        if (size_<total_submtx_elements || NULL==subMtx_) {
+                            if (subMtx_) {
+                                free(subMtx_);
+                            }
+                            subMtx_ = (float*) malloc(total_submtx_elements*sizeof(float));
+                            if (subMtx_) {
+                                size_ = total_submtx_elements;
+                            }
+                        }
+
+                        memcpy(subMtx_, rhs.subMtx_, total_submtx_elements*sizeof(float));
+                    }
+                }
+                else {
+                    Clear();
+                }
+            }
+            return *this;
+        }
+
         // clear
         void Clear() {
             bands_ = 0; m00_ = 0.0f;

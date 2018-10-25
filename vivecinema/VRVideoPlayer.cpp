@@ -147,6 +147,7 @@ VideoTrack::~VideoTrack()
 }
 
 //---------------------------------------------------------------------------------------
+#if 0
 bool VRVideoPlayer::Tetrahedron::Create()
 {
     if (0!=vao_) {
@@ -194,6 +195,7 @@ bool VRVideoPlayer::Tetrahedron::Create()
 
     return true;
 }
+#endif
 //---------------------------------------------------------------------------------------
 bool VRVideoPlayer::SphereGeometry::Create(int longitude, int latitude_south, int latitude_north)
 {
@@ -512,45 +514,46 @@ bool VRVideoPlayer::CubeGeometry::Create()
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
     // vertex buffer
+    float const radius = 10.0f;
     struct vertex {
         float x, y, z;
         float u, v, cu, cv;
     } cube[24] = {
         // right(+X) face
-        {  0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius,  radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius,  radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius, -radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius, -radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
 
         // front(+Y) face
-        { -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius,  radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius,  radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius,  radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius,  radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
 
         // up(+Z) face
-        { -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius, -radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius,  radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius,  radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius, -radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
 
         // left(-X) face
-        { -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius, -radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius, -radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius,  radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius,  radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
 
         // back(-Y) face
-        {  0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius, -radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius, -radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius, -radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius, -radius,  radius,  0.0f, 0.0f,  0.0f, 0.0f },
 
         // down(-Z) face
-        { -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f, -0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
-        {  0.5f,  0.5f, -0.5f,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius,  radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        { -radius, -radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius, -radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
+        {  radius,  radius, -radius,  0.0f, 0.0f,  0.0f, 0.0f },
     };
 
     //
@@ -566,13 +569,19 @@ bool VRVideoPlayer::CubeGeometry::Create()
     //      ---------------------------------------
     //  2. Facebook Transform360 Cubemap_23_offcenter
     //  3. YouTube EAC
-    int const total_layouts = 3;
+    int const total_layouts = 4;
     int const total_vb_size = total_layouts*2*sizeof(cube); // 2 cubes for each layout
     uint8* vb = (uint8*) malloc(total_vb_size);
     uint8* ptr = vb;
 
     //
-    // CUBEMAP_32 | Google Spherical Video V2 RFC(layout:0) mono - offset = 0
+    // equirectangular - 0ffset = 0
+    {
+        memcpy(ptr, cube, sizeof(cube)); ptr += sizeof(cube);
+    }
+
+    //
+    // CUBEMAP_32 | Google Spherical Video V2 RFC(layout:0) mono - offset = 24
     {
         // u & v
         float const du = 0.5f/3.0f;
@@ -637,7 +646,7 @@ bool VRVideoPlayer::CubeGeometry::Create()
     }
 
     //
-    // CUBEMAP_32 | Google Spherical Video V2 RFC(layout:0) stereo - offset = 24
+    // CUBEMAP_32 | Google Spherical Video V2 RFC(layout:0) stereo - offset = 48
     {
         //
         // TO-DO : Need to check...
@@ -706,7 +715,7 @@ bool VRVideoPlayer::CubeGeometry::Create()
     }
 
     //
-    // CUBEMAP_23_OFFCENTER mono - offset = 48
+    // CUBEMAP_23_OFFCENTER mono - offset = 72
     {
         // u & v
         float const du = 0.5f/2.0f;
@@ -771,7 +780,7 @@ bool VRVideoPlayer::CubeGeometry::Create()
     }
 
     //
-    // CUBEMAP_23_OFFCENTER stereo - offset = 72
+    // CUBEMAP_23_OFFCENTER stereo - offset = 96
     {
         // u & v
         float const du = 0.5f/4.0f;
@@ -836,7 +845,7 @@ bool VRVideoPlayer::CubeGeometry::Create()
     }
 
     //
-    // YouTube EAC mono - offset = 96
+    // YouTube EAC mono - offset = 120
     {
         // u & v
         float const du = 0.5f/3.0f;
@@ -901,7 +910,7 @@ bool VRVideoPlayer::CubeGeometry::Create()
     }
 
     //
-    // YouTube EAC stereo - offset = 120
+    // YouTube EAC stereo - offset = 144
     {
         // u & v
         float const du = 0.5f/4.0f;
@@ -988,26 +997,35 @@ bool VRVideoPlayer::CubeGeometry::Create()
 //---------------------------------------------------------------------------------------
 bool VRVideoPlayer::CubeGeometry::Draw(VIDEO_TYPE type, uint32 layout) const
 {
-    VIDEO_TYPE const cubic = (VIDEO_TYPE) (VIDEO_TYPE_CUBE&type);
-    if ((VIDEO_TYPE_EAC==cubic || VIDEO_TYPE_CUBEMAP==cubic) && vao_) {
-        int offset = 0;
-        if (256==layout) { // CUBEMAP_23_OFFCENTER
-            offset += 48;
-        }
-        else if (257==layout) { // YouTube
-            offset += 96;
-        }
-        else {
-            assert(0==layout);
-        }
-
-        if (VIDEO_3D_MONO!=(VIDEO_TYPE_3D_MASK&type)) {
-            offset += 24;
-        }
-
+    if (VIDEO_TYPE_EQUIRECT==type) {
         glBindVertexArray(vao_);
-        glDrawArrays(GL_QUADS, offset, 24);
+        glDrawArrays(GL_QUADS, 0, 24);
+        glBindVertexArray(0);
         return true;
+    }
+    else {
+        VIDEO_TYPE const cubic = (VIDEO_TYPE) (VIDEO_TYPE_CUBE&type);
+        if ((VIDEO_TYPE_EAC==cubic || VIDEO_TYPE_CUBEMAP==cubic) && vao_) {
+            int offset = 24;
+            if (256==layout) { // CUBEMAP_23_OFFCENTER
+                offset += 48;
+            }
+            else if (257==layout) { // YouTube
+                offset += 96;
+            }
+            else {
+                assert(0==layout);
+            }
+
+            if (VIDEO_3D_MONO!=(VIDEO_TYPE_3D_MASK&type)) {
+                offset += 24;
+            }
+
+            glBindVertexArray(vao_);
+            glDrawArrays(GL_QUADS, offset, 24);
+            glBindVertexArray(0);
+            return true;
+        }
     }
     return false;
 }
@@ -1042,7 +1060,7 @@ vrMgr_(mlabs::balai::VR::Manager::GetInstance()),
 focus_controller_(NULL),
 thumbnailBuffer_(NULL),audioBuffer_(NULL),
 thumbnailBufferSize_(0),audioBufferSize_(0),
-enclosure_(),dome_(),cube_(),
+dome_(),cube_(),
 hmd_xform_(Matrix3::Identity),
 viewer_xform_(Matrix3::Identity),
 dashboard_xform_(Matrix3::Identity),
@@ -1882,7 +1900,6 @@ bool VRVideoPlayer::Initialize()
     subtitleFxShadowColor_ = subtitleFx_->FindConstant("shadow");
 
     // geometry
-    enclosure_.Create();
     dome_.Create(180);
     cube_.Create();
 
@@ -2266,7 +2283,6 @@ void VRVideoPlayer::Finalize()
     fonts_.clear();
 
     // geometries
-    enclosure_.Destroy();
     dome_.Destroy();
     cube_.Destroy();
 }
@@ -4114,7 +4130,7 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
         int longi, lati_south, lati_north;
         current_track_->GetSphericalAngles(longi, lati_south, lati_north);
         if (360==longi && -90==lati_south && 90==lati_north) {
-            enclosure_.Draw();
+            cube_.Draw(VIDEO_TYPE_EQUIRECT, 0);
         }
         else {
             dome_.Draw();
@@ -4150,7 +4166,7 @@ bool VRVideoPlayer::Render(VR::HMD_EYE eye) const
         float const diffuse[4] = { val, val, val, 1.0f };
         pan360_->BindConstant(pan360Diffuse_, diffuse);
         renderer.CommitChanges();
-        enclosure_.Draw();
+        cube_.Draw(VIDEO_TYPE_EQUIRECT, 0);
     }
 
     // pop view matrix

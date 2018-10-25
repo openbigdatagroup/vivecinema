@@ -2009,7 +2009,7 @@ bool VRVideoPlayer::DrawMainMenu_(mlabs::balai::VR::HMD_EYE eye) const
     pan360_->BindConstant(pan360Diffuse_, diffuse);
     pan360_->BindSampler(pan360Map_, background_);
     renderer.CommitChanges();
-    enclosure_.Draw();
+    cube_.Draw(VIDEO_TYPE_EQUIRECT, 0);
     renderer.PopViewMatrix();
 
     Matrix3 dashboard_aniamtion_xform = dashboard_xform_;

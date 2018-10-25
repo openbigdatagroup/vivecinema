@@ -1762,10 +1762,13 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
                 if (contentSize==rsize) {
                     int const ambisonic_order = (a3d[2]<<24)|(a3d[3]<<16)|(a3d[4]<<24)|a3d[5];
                     int const sa3d_num_channels = (a3d[8]<<24)|(a3d[9]<<16)|(a3d[10]<<8)|a3d[11];
-                    BL_LOG("SA3D box(%s) : version=%d(must be 0) type=%d(0:Periphonic): order=%d(1:FOA) channel_ordering=%d(0:ACN) normalization=%d(0:SN3D) #(channels)=%d(4:FOA)\n",
+                    int const head_locked_stereo = (0x80==(0x80 & a3d[1])) ? 2:0;
+                    int const ambisonic_type = a3d[1]&0x7f;
+                    BL_LOG("SA3D box(%s) : version=%d(must be 0) type=%d(0:Periphonic%s): order=%d(1:FOA) channel_ordering=%d(0:ACN) normalization=%d(0:SN3D) #(channels)=%d(4:FOA)\n",
                            name,
                            a3d[0], // version must be 0
-                           a3d[1], // ambisonic_type, 0 = Periphonic(Full 3D)
+                           ambisonic_type, // must be 0 = Periphonic(Full 3D)
+                           (2==head_locked_stereo) ? "+HL":"", 
                            ambisonic_order, // ambisonic_order, must be 1 currently
                            a3d[6], // ambisonic_channel_ordering, must be 0(ACN) currently
                            a3d[7], // ambisonic_normalization, 0 = SN3D
@@ -1778,8 +1781,8 @@ aligned(8) class SpatialAudioBox extends Box('SA3D') {
 
                     sa3d_.Reset();
 
-                    if (0==a3d[0] && 0==a3d[1] && 0<ambisonic_order && ambisonic_order<=3 &&
-                        0==a3d[6] && sa3d_num_channels==((ambisonic_order+1)*(ambisonic_order+1))) {
+                    if (0==a3d[0] && 0==ambisonic_type && 0<ambisonic_order && ambisonic_order<=3 &&
+                        0==a3d[6] && sa3d_num_channels==((ambisonic_order+1)*(ambisonic_order+1)+head_locked_stereo)) {
                         sa3d_.Technique = AUDIO_TECHNIQUE_AMBIX;
                         if (0==a3d[7]) {
                             // SN3D
@@ -3202,7 +3205,6 @@ public:
                     for (int i=0; i<ele.NumAttribs; ++i) {
                         XML_Attrib const& att = ele.Attributes[i];
                         uint32 const attr_name = mlabs::balai::CalcCRC(att.Name);
-                        uint32 const attr_value = mlabs::balai::CalcCRC(att.Value);
                         if (NULL==name && crc_name==attr_name) {
                             name = att.Value;
                         }
@@ -3210,10 +3212,11 @@ public:
                             url = att.Value;
                         }
                         else if (crc_st3d==attr_name) {
-                            if (crc_TB==attr_value) {
+                            uint32 const st3d_value = mlabs::balai::CalcCRC(att.Value);
+                            if (crc_TB==st3d_value) {
                                 st3d = 1; // top-down
                             }
-                            else if (crc_SBS==attr_value) {
+                            else if (crc_SBS==st3d_value) {
                                 st3d = 2; // left-right
                             }
                         }
@@ -3306,47 +3309,48 @@ public:
                         }
                         // 'sv3d' to be deprecated. use 'proj'
                         else if (crc_sv3d==attr_name) {
-                            if (crc_180==attr_value) {
+                            uint32 const crc_sv3d_value = mlabs::balai::CalcCRC(att.Value);
+                            if (crc_180==crc_sv3d_value) {
                                 st3d = 0; // mono
                                 proj = 1; // equirectangular
                                 lon = 180;
                                 lat = 180;
                             }
-                            else if (crc_180SBS==attr_value) {
+                            else if (crc_180SBS==crc_sv3d_value) {
                                 st3d = 2; // left-right
                                 proj = 1; // equirectangular
                                 lon = 180;
                                 lat = 180;
                             }
-                            else if (crc_180TB==attr_value) {
+                            else if (crc_180TB==crc_sv3d_value) {
                                 st3d = 1; // top-down
                                 proj = 1; // equirectangular
                                 lon = 180;
                                 lat = 180;
                             }
-                            else if (crc_360==attr_value) {
+                            else if (crc_360==crc_sv3d_value) {
                                 st3d = 0; // mono
                                 proj = 1; // equirectangular
                                 lon = 360;
                                 lat = 180;
                             }
-                            else if (crc_360SBS==attr_value) {
+                            else if (crc_360SBS==crc_sv3d_value) {
                                 st3d = 2; // left-right
                                 proj = 1; // equirectangular
                                 lon = 360;
                                 lat = 180;
                             }
-                            else if (crc_360TB==attr_value) {
+                            else if (crc_360TB==crc_sv3d_value) {
                                 st3d = 1; // top-down
                                 proj = 1; // equirectangular
                                 lon = 360;
                                 lat = 180;
                             }
-                            else if (crc_SBS==attr_value) {
+                            else if (crc_SBS==crc_sv3d_value) {
                                 st3d = 2; // left-right
                                 proj = lon = lat = 0; // plane
                             }
-                            else if (crc_TB==attr_value) {
+                            else if (crc_TB==crc_sv3d_value) {
                                 st3d = 1; // top-down
                                 proj = lon = lat = 0; // plane
                             }

@@ -231,13 +231,14 @@ class AudioManager
     math::FFTConvolver itu_7_1_HRTF_; // ITU 5.1/7.1 HRTF (no subwoofer), 7*2 channels.
 
     // Ambisonics sound field rotator
-    math::SphericalHarmonics::SHRotateMatrix shRotate_;
+    math::SphericalHarmonics::SHRotateMatrix shRotate_, shRotateLast_;
 
     // audio buffer for decoding
     float* buffer_;
     int    bufferSize_;
 
-    bool pause_;
+    bool   pause_;
+    bool   noSHLerp_; // linear interpolation of rotated ambisonics SH signal
 
     // prepare...
     void Prepare_() {
@@ -246,6 +247,7 @@ class AudioManager
         soa_SH_HRTF_.Reset();
         toa_SH_HRTF_.Reset();
         itu_7_1_HRTF_.Reset();
+        noSHLerp_ = true;
     }
 
     bool InitHRTFs_();
@@ -298,15 +300,16 @@ protected:
         decoders_(32),activeDecoder_(NULL),
         renderAudioData_(nullptr),default_(),current_(),
         foa_SH_HRTF_(),soa_SH_HRTF_(),toa_SH_HRTF_(),itu_7_1_HRTF_(),
-        shRotate_(),
+        shRotate_(),shRotateLast_(),
         buffer_(NULL),bufferSize_(0),
-        pause_(true) {
+        pause_(true),noSHLerp_(false) {
         bufferSize_ = 2048*(16+2)*sizeof(float);
         buffer_ = (float*) malloc(bufferSize_);
         if (NULL==buffer_) {
             bufferSize_ = 0;
         }
         shRotate_.Reserve(4);
+        shRotateLast_.Reserve(4);
     }
     virtual ~AudioManager() {
         DeInitAudio();

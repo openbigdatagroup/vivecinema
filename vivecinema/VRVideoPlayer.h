@@ -1194,7 +1194,9 @@ class VRVideoPlayer : public IAVDecoderHost
     int    thumbnailBufferSize_;
     int    audioBufferSize_;
 
+#if 0
     // Tetrahedron - the simplest geometry to draw full sphere(360x180) VR videos
+    // but if fov is really wide(says, 150 fov), near clipping may occur.
     struct Tetrahedron {
         GLuint vao_, vbo_;
         Tetrahedron():vao_(0),vbo_(0) {}
@@ -1209,11 +1211,13 @@ class VRVideoPlayer : public IAVDecoderHost
             if (vao_) {
                 glBindVertexArray(vao_);
                 glDrawArrays(GL_TRIANGLES, 0, 12);
+                glBindVertexArray(0);
                 return true;
             }
             return false;
         }
     } enclosure_;
+#endif
 
     // sphere geometry
     struct SphereGeometry {
@@ -1243,6 +1247,7 @@ class VRVideoPlayer : public IAVDecoderHost
                 glBindVertexArray(vao_);
                 glDrawElements(GL_TRIANGLE_STRIP, num_indices_, GL_UNSIGNED_SHORT, 0);
                 //glDrawElements(GL_LINE_STRIP, num_indices_, GL_UNSIGNED_SHORT, 0);
+                glBindVertexArray(0);
                 return true;
             }
             return false;
@@ -1857,17 +1862,13 @@ public:
 
     bool AudioSettingCallback(int /*decoder_id*/, AudioInfo& ai) {
         assert(0<ai.TotalChannels);
-/*
-        //
-        // TO-DO : full check and make best guess for technique.
-        // 
+
         int audio_streamId[64];
         int audio_channels[64];
         ISO_639 languages[64];
         int const total_audio_streams = decoder_.GetAudioStreamInfo(audio_streamId,
                                                                     audio_channels,
                                                                     languages, 64);
-*/
         // verify technique
         bool verify_technique = true;
         if (AUDIO_TECHNIQUE_AMBIX==ai.Technique || AUDIO_TECHNIQUE_FUMA==ai.Technique) {
@@ -1895,6 +1896,18 @@ public:
                     break;
                 }
             }
+
+            ////////////////////////////////////////////////////////////////////
+            // headlocked stereo stream for GHIFF 2018.10.01 
+            if (verify_technique && total_audio_streams>1 && 1==ai.TotalStreams) {
+                if (audio_streamId[0]==ai.StreamIndices[0] && audio_channels[0]==ai.StreamChannels[0] && 2==audio_channels[1]) {
+                    ai.TotalStreams = 2;
+                    ai.TotalChannels += 2;
+                    ai.StreamIndices[1] = (uint8) audio_streamId[1];
+                    ai.StreamChannels[1] = 2;
+                }
+            }
+            /////////////////////////////////////////////////////////////////////////
         }
         else if (AUDIO_TECHNIQUE_TBE==ai.Technique) {
             verify_technique = false; // 4+4 or 4+4+2

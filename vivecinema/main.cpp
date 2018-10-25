@@ -97,8 +97,9 @@
  *   2018.06.07 ver 1.0.813 - use Prof. Angelo's revised TBE/AmbiX conversion formula.
  *   2018.06.08 ver 1.0.814 - Cubemap/EAC projection with layout 3x2, 2x3 offcenter & YouTube.
  *   2018.06.15 ver 1.0.821 - Tweak CUVID parameters... last day @ HTC. so long...
+ *   2018.10.10 ver 1.1.938 - new YouTube format FOA+headlocked, ambisonic SH rotation with linear interpolation. for Taipei Gold Horse Fantasy Film Festival VR 5x1
  */
-char const* const buildNo = "Vive Cinema Build 1.0.821";
+char const* const buildNo = "Vive Cinema Build 1.1.938";
 
 BL_CSTD_MEMMGR_IMPLMENTATION(64<<20, 1<<20);
 

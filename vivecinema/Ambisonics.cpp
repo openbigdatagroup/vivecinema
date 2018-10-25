@@ -458,6 +458,11 @@ bool AudioManager::DecodeAmbisonicHRTF_(void* output, AUDIO_FORMAT fmt,
 
     // show time!!! -- but just listen:-)
     if (AUDIO_TECHNIQUE_AMBIX==desc.Technique || AUDIO_TECHNIQUE_FUMA==desc.Technique) {
+        // 2018.10.10 - rotation interpolation
+        float sh1[16], sh2[16];
+        float alpha(0.0f), inv_alpha;
+        float const delta_alpha = 1.25f/frames;
+
         if (4==desc.NumChannels || 6==desc.NumChannels) { // 1st order
             if (AUDIO_TECHNIQUE_AMBIX==desc.Technique)
                 shRotate_.BuildRotationMatrixAmbiX(2, mtx);
@@ -504,8 +509,31 @@ bool AudioManager::DecodeAmbisonicHRTF_(void* output, AUDIO_FORMAT fmt,
 
             // rotate and de-interleave
             float* w = buffer_;
-            for (int i=0; i<frames; ++i,++w,src+=desc.NumChannels) {
-                shRotate_.Transform(w, frames, src);
+
+            if (!noSHLerp_) {
+                assert(shRotateLast_.NumBands()==shRotate_.NumBands());
+                for (int i=0; i<frames; ++i,++w,src+=desc.NumChannels) {
+                    if (alpha<1.0f) {
+                        inv_alpha = 1.0f - alpha;
+                        shRotateLast_.Transform(sh1, 1, src);
+                        shRotate_.Transform(sh2, 1, src);
+
+                        for (int k=0; k<9; ++k) {
+                            w[k*frames] = inv_alpha*sh1[k] + alpha*sh2[k];
+                        }
+
+                        alpha += delta_alpha;
+                    }
+                    else {
+                        shRotate_.Transform(w, frames, src);
+                    }
+                }
+            }
+            else {
+                noSHLerp_ = false;
+                for (int i=0; i<frames; ++i,++w,src+=desc.NumChannels) {
+                    shRotate_.Transform(w, frames, src);
+                }
             }
 
             // HRTF processing
@@ -548,8 +576,31 @@ bool AudioManager::DecodeAmbisonicHRTF_(void* output, AUDIO_FORMAT fmt,
 
             // rotate and de-interleave
             float* w = buffer_;
-            for (int i=0; i<frames; ++i,++w,src+=desc.NumChannels) {
-                shRotate_.Transform(w, frames, src);
+
+            if (!noSHLerp_) {
+                assert(shRotateLast_.NumBands()==shRotate_.NumBands());
+                for (int i=0; i<frames; ++i,++w,src+=desc.NumChannels) {
+                    if (alpha<1.0f) {
+                        inv_alpha = 1.0f - alpha;
+                        shRotateLast_.Transform(sh1, 1, src);
+                        shRotate_.Transform(sh2, 1, src);
+
+                        for (int k=0; k<16; ++k) {
+                            w[k*frames] = inv_alpha*sh1[k] + alpha*sh2[k];
+                        }
+
+                        alpha += delta_alpha;
+                    }
+                    else {
+                        shRotate_.Transform(w, frames, src);
+                    }
+                }
+            }
+            else {
+                noSHLerp_ = false;
+                for (int i=0; i<frames; ++i,++w,src+=desc.NumChannels) {
+                    shRotate_.Transform(w, frames, src);
+                }
             }
 
             // HRTF processing
@@ -657,6 +708,9 @@ bool AudioManager::DecodeAmbisonicHRTF_(void* output, AUDIO_FORMAT fmt,
         assert(!"wrong format!!!");
         return false;
     }
+
+    // update last
+    shRotateLast_ = shRotate_;
 
     if (NULL!=mid && NULL!=side) {
         //
